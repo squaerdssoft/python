@@ -1,0 +1,2969 @@
+# ─────────────────────────────────────────────────────────────────
+#  STANDART KÜTÜPHANELER
+# ─────────────────────────────────────────────────────────────────
+import asyncio
+import base64
+import concurrent.futures
+import ctypes
+import io
+import json
+import logging
+import math
+import os
+import platform
+import random
+import re
+import shutil
+import string
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import traceback
+import uuid
+import webbrowser
+from collections import deque
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from pathlib import Path
+from typing import Callable, Any, Optional
+from urllib.parse import quote_plus
+
+# ─────────────────────────────────────────────────────────────────
+#  OPSİYONEL KÜTÜPHANELER
+# ─────────────────────────────────────────────────────────────────
+try:
+    import pyaudio
+    _PYAUDIO = True
+except ImportError:
+    _PYAUDIO = False
+    print("[Vesper] ⚠ pyaudio yok. Ses devre dışı.")
+
+try:
+    import pyautogui
+    pyautogui.FAILSAFE = True
+    pyautogui.PAUSE = 0.05
+    _PYAUTOGUI = True
+except ImportError:
+    _PYAUTOGUI = False
+
+try:
+    import pyperclip
+    _PYPERCLIP = True
+except ImportError:
+    _PYPERCLIP = False
+
+try:
+    import psutil
+    _PSUTIL = True
+except ImportError:
+    _PSUTIL = False
+
+try:
+    import cv2
+    _CV2 = True
+except ImportError:
+    _CV2 = False
+
+try:
+    import numpy as np
+    _NUMPY = True
+except ImportError:
+    _NUMPY = False
+
+try:
+    import mss
+    import mss.tools
+    _MSS = True
+except ImportError:
+    _MSS = False
+
+try:
+    import PIL.Image
+    _PIL = True
+except ImportError:
+    _PIL = False
+
+try:
+    import requests
+    from bs4 import BeautifulSoup
+    _REQUESTS = True
+except ImportError:
+    _REQUESTS = False
+
+try:
+    from youtube_transcript_api import YouTubeTranscriptApi
+    _TRANSCRIPT = True
+except ImportError:
+    _TRANSCRIPT = False
+
+try:
+    import send2trash
+    _SEND2TRASH = True
+except ImportError:
+    _SEND2TRASH = False
+
+try:
+    import tkinter as tk
+    from tkinter import messagebox
+    _TK = True
+except ImportError:
+    _TK = False
+    print("[Vesper] ⚠ tkinter yok. Arayüz devre dışı.")
+
+try:
+    from google import genai as google_genai
+    from google.genai import types as genai_types
+    import google.generativeai as genai
+    _GENAI = True
+except ImportError:
+    _GENAI = False
+    print("[Vesper] ⚠ google-generativeai yok. pip install google-generativeai")
+
+try:
+    from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout
+    _PLAYWRIGHT = True
+except ImportError:
+    _PLAYWRIGHT = False
+
+# ─────────────────────────────────────────────────────────────────
+#  YOLLAR & SABITLER
+# ─────────────────────────────────────────────────────────────────
+def get_base_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        # PyInstaller bundled Assets (like Vesper.png if added)
+        if hasattr(sys, "_MEIPASS"):
+            return Path(sys._MEIPASS)
+        return Path(sys.executable).parent
+    return Path(__file__).resolve().parent
+
+BASE_DIR        = get_base_dir()
+DATA_DIR        = Path(sys.executable).parent if getattr(sys, "frozen", False) else BASE_DIR
+
+VAULT_DIR       = DATA_DIR / "security_vault"
+API_CONFIG_PATH = VAULT_DIR / "access.json"
+MEMORY_PATH     = DATA_DIR / "neural_store" / "memory.json"
+PROMPT_PATH     = DATA_DIR / "system_laws" / "rules.txt"
+PROJECTS_DIR    = DATA_DIR / "VesperProjects"
+
+SYSTEM_NAME  = "Vesper — NEURAL ARCHIVE"
+LIVE_MODEL   = "models/gemini-2.5-flash-native-audio-preview-12-2025"
+GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_LITE  = "gemini-2.5-flash-lite"
+
+PA_FORMAT           = pyaudio.paInt16 if _PYAUDIO else None
+CHANNELS            = 1
+SEND_SAMPLE_RATE    = 16000
+RECEIVE_SAMPLE_RATE = 24000
+CHUNK_SIZE          = 1024
+
+# Tema renkleri (******* Tarzı - Altın Sarısı / Lacivert / Mavi)
+C_BG        = "#030A14"   # Koyu Lacivert / Siyah arka plan
+C_PRIMARY   = "#FFB300"   # Altın Sarısı / Enerji Turuncusu
+C_SECONDARY = "#00A8FF"   # Jarvis Mavisi / Camgöbeği
+C_GLOW      = "#004B87"   # Koyu Mavi Parlama
+C_TEXT      = "#E6F4FF"   # Açık maviye çalan temiz beyaz
+C_ALERT     = "#FF3300"   # Kırmızı alarm
+
+# ─────────────────────────────────────────────────────────────────
+#  LOGGING
+# ─────────────────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.WARNING,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+    handlers=[
+        logging.FileHandler(DATA_DIR / "Vesper_neural.log", mode="w", encoding="utf-8"),
+        logging.StreamHandler(sys.stdout),
+    ],
+    force=True,
+)
+logger = logging.getLogger("Vesper")
+logger.setLevel(logging.INFO)
+
+# ─────────────────────────────────────────────────────────────────
+#  API YARDIMCILARI
+# ─────────────────────────────────────────────────────────────────
+def _get_api_key() -> str:
+    # Kullanıcı tarafından tanımlanan hardcoded API Key
+    return "AIzaSyDeS_CxJC-q0xpqtE3Ch8kGEL6aQugOl_0"
+
+def _get_gemini(model: str = GEMINI_MODEL):
+    genai.configure(api_key=_get_api_key())
+    return genai.GenerativeModel(model)
+
+def _load_system_prompt() -> str:
+    try:
+        return PROMPT_PATH.read_text(encoding="utf-8")
+    except Exception:
+        return (
+            "Sen bir zekisin, Vesper asistanısın. "
+            "Tony Stark'ın asistanı J.A.R.V.I.S. gibi akıllı, sadık ve profesyonel bir erkek asistan ol. "
+            "Türkçen kusursuz, mantığın keskin olmalı. "
+            "Kullanıcıya 'Efendim' diye hitap et."
+        )
+
+# ─────────────────────────────────────────────────────────────────
+#  BELLEK (NEURAL STORE)
+# ─────────────────────────────────────────────────────────────────
+_mem_lock = threading.Lock()
+MAX_VALUE_LEN = 300
+
+def _empty_memory() -> dict:
+    return {"identity": {}, "preferences": {}, "relationships": {}, "notes": {}}
+
+def load_memory() -> dict:
+    if not MEMORY_PATH.exists():
+        return _empty_memory()
+    with _mem_lock:
+        try:
+            data = json.loads(MEMORY_PATH.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else _empty_memory()
+        except Exception as e:
+            print(f"[Memory] ⚠ Yükleme hatası: {e}")
+            return _empty_memory()
+
+def save_memory(memory: dict) -> None:
+    if not isinstance(memory, dict):
+        return
+    MEMORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with _mem_lock:
+        MEMORY_PATH.write_text(json.dumps(memory, indent=2, ensure_ascii=False), encoding="utf-8")
+
+def _truncate_value(val: str) -> str:
+    if isinstance(val, str) and len(val) > MAX_VALUE_LEN:
+        return val[:MAX_VALUE_LEN].rstrip() + "…"
+    return val
+
+def _recursive_update(target: dict, updates: dict) -> bool:
+    changed = False
+    for key, value in updates.items():
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        if isinstance(value, dict) and "value" not in value:
+            if key not in target or not isinstance(target[key], dict):
+                target[key] = {}
+                changed = True
+            if _recursive_update(target[key], value):
+                changed = True
+        else:
+            entry = {"value": _truncate_value(str(value["value"] if isinstance(value, dict) and "value" in value else value))}
+            if key not in target or target[key] != entry:
+                target[key] = entry
+                changed = True
+    return changed
+
+def update_memory(memory_update: dict) -> dict:
+    if not isinstance(memory_update, dict) or not memory_update:
+        return load_memory()
+    memory = load_memory()
+    if _recursive_update(memory, memory_update):
+        save_memory(memory)
+        print(f"[Memory] 💾 Kaydedildi: {list(memory_update.keys())}")
+    return memory
+
+def format_memory_for_prompt(memory: dict | None) -> str:
+    if not memory:
+        return ""
+    lines = []
+    identity = memory.get("identity", {})
+    for key in ("name", "age", "birthday", "city"):
+        val = identity.get(key, {}).get("value")
+        if val:
+            lines.append(f"{key.title()}: {val}")
+    for section in ("preferences", "relationships", "notes"):
+        for i, (k, v) in enumerate(memory.get(section, {}).items()):
+            if i >= 5:
+                break
+            val = v.get("value") if isinstance(v, dict) else v
+            if val:
+                lines.append(f"{k.replace('_', ' ').title()}: {val}")
+    if not lines:
+        return ""
+    result = "[KULLANICI BELLEĞİ]\n" + "\n".join(f"- {l}" for l in lines)
+    if len(result) > 800:
+        result = result[:797] + "…"
+    return result + "\n"
+
+# ─────────────────────────────────────────────────────────────────
+#  SENSORY HUB
+# ─────────────────────────────────────────────────────────────────
+SENSORY_HUB = {
+    "visual_context": "Görsel veri yok.",
+    "system_health": "Stabil",
+    "last_alert": None,
+}
+
+def _get_full_prompt() -> str:
+    mem_str = format_memory_for_prompt(load_memory())
+    sys_p   = _load_system_prompt()
+    now     = datetime.now()
+    time_str = now.strftime("%A, %d %B %Y — %H:%M")
+    sensory_p = (
+        f"\n[SENSORY CONTEXT]\n"
+        f"Görsel: {SENSORY_HUB['visual_context']}\n"
+        f"Sistem: {SENSORY_HUB['system_health']}\n"
+    )
+    time_ctx = (
+        f"[GÜNCEL TARİH & SAAT]\nŞu an: {time_str}\n\n"
+    )
+    return time_ctx + sensory_p + (mem_str + "\n\n" + sys_p if mem_str else sys_p)
+
+# ─────────────────────────────────────────────────────────────────
+#  UYGULAMA AÇICI (open_app)
+# ─────────────────────────────────────────────────────────────────
+_APP_ALIASES = {
+    "whatsapp":           {"Windows": "WhatsApp",        "Darwin": "WhatsApp",            "Linux": "whatsapp"},
+    "chrome":             {"Windows": "chrome",          "Darwin": "Google Chrome",       "Linux": "google-chrome"},
+    "google chrome":      {"Windows": "chrome",          "Darwin": "Google Chrome",       "Linux": "google-chrome"},
+    "firefox":            {"Windows": "firefox",         "Darwin": "Firefox",             "Linux": "firefox"},
+    "spotify":            {"Windows": "Spotify",         "Darwin": "Spotify",             "Linux": "spotify"},
+    "vscode":             {"Windows": "code",            "Darwin": "Visual Studio Code",  "Linux": "code"},
+    "visual studio code": {"Windows": "code",            "Darwin": "Visual Studio Code",  "Linux": "code"},
+    "discord":            {"Windows": "Discord",         "Darwin": "Discord",             "Linux": "discord"},
+    "telegram":           {"Windows": "Telegram",        "Darwin": "Telegram",            "Linux": "telegram"},
+    "instagram":          {"Windows": "Instagram",       "Darwin": "Instagram",           "Linux": "instagram"},
+    "tiktok":             {"Windows": "TikTok",          "Darwin": "TikTok",              "Linux": "tiktok"},
+    "notepad":            {"Windows": "notepad.exe",     "Darwin": "TextEdit",            "Linux": "gedit"},
+    "calculator":         {"Windows": "calc.exe",        "Darwin": "Calculator",          "Linux": "gnome-calculator"},
+    "terminal":           {"Windows": "cmd.exe",         "Darwin": "Terminal",            "Linux": "gnome-terminal"},
+    "cmd":                {"Windows": "cmd.exe",         "Darwin": "Terminal",            "Linux": "bash"},
+    "explorer":           {"Windows": "explorer.exe",    "Darwin": "Finder",              "Linux": "nautilus"},
+    "file explorer":      {"Windows": "explorer.exe",    "Darwin": "Finder",              "Linux": "nautilus"},
+    "paint":              {"Windows": "mspaint.exe",     "Darwin": "Preview",             "Linux": "gimp"},
+    "word":               {"Windows": "winword",         "Darwin": "Microsoft Word",      "Linux": "libreoffice --writer"},
+    "excel":              {"Windows": "excel",           "Darwin": "Microsoft Excel",     "Linux": "libreoffice --calc"},
+    "powerpoint":         {"Windows": "powerpnt",        "Darwin": "Microsoft PowerPoint","Linux": "libreoffice --impress"},
+    "vlc":                {"Windows": "vlc",             "Darwin": "VLC",                 "Linux": "vlc"},
+    "zoom":               {"Windows": "Zoom",            "Darwin": "zoom.us",             "Linux": "zoom"},
+    "slack":              {"Windows": "Slack",           "Darwin": "Slack",               "Linux": "slack"},
+    "steam":              {"Windows": "steam",           "Darwin": "Steam",               "Linux": "steam"},
+    "task manager":       {"Windows": "taskmgr.exe",     "Darwin": "Activity Monitor",    "Linux": "gnome-system-monitor"},
+    "settings":           {"Windows": "ms-settings:",   "Darwin": "System Preferences",  "Linux": "gnome-control-center"},
+    "brave":              {"Windows": "brave",           "Darwin": "Brave Browser",       "Linux": "brave-browser"},
+    "edge":               {"Windows": "msedge",          "Darwin": "Microsoft Edge",      "Linux": "microsoft-edge"},
+    "obsidian":           {"Windows": "Obsidian",        "Darwin": "Obsidian",            "Linux": "obsidian"},
+    "notion":             {"Windows": "Notion",          "Darwin": "Notion",              "Linux": "notion"},
+    "blender":            {"Windows": "blender",         "Darwin": "Blender",             "Linux": "blender"},
+    "figma":              {"Windows": "Figma",           "Darwin": "Figma",               "Linux": "figma"},
+}
+
+def _normalize_app(raw: str) -> str:
+    system = platform.system()
+    key    = raw.lower().strip()
+    if key in _APP_ALIASES:
+        return _APP_ALIASES[key].get(system, raw)
+    for alias_key, os_map in _APP_ALIASES.items():
+        if alias_key in key or key in alias_key:
+            return os_map.get(system, raw)
+    return raw
+
+def _is_running(app_name: str) -> bool:
+    if not _PSUTIL:
+        return True
+    app_lower = app_name.lower().replace(" ", "").replace(".exe", "")
+    try:
+        for proc in psutil.process_iter(["name"]):
+            try:
+                pname = proc.info["name"].lower().replace(" ", "").replace(".exe", "")
+                if app_lower in pname or pname in app_lower:
+                    return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+    except Exception:
+        pass
+    return False
+
+def _launch_windows_app(app_name: str) -> bool:
+    try:
+        pyautogui.PAUSE = 0.1
+        pyautogui.press("win")
+        time.sleep(0.6)
+        pyautogui.write(app_name, interval=0.05)
+        time.sleep(0.8)
+        pyautogui.press("enter")
+        time.sleep(3.0)
+        return True
+    except Exception as e:
+        logger.warning(f"Windows uygulama başlatma hatası: {e}")
+        return False
+
+def _launch_macos_app(app_name: str) -> bool:
+    try:
+        result = subprocess.run(["open", "-a", app_name], capture_output=True, timeout=8)
+        if result.returncode == 0:
+            time.sleep(1.0)
+            return True
+    except Exception:
+        pass
+    try:
+        pyautogui.hotkey("command", "space")
+        time.sleep(0.6)
+        pyautogui.write(app_name, interval=0.05)
+        time.sleep(0.8)
+        pyautogui.press("enter")
+        time.sleep(1.5)
+        return True
+    except Exception:
+        return False
+
+def _launch_linux_app(app_name: str) -> bool:
+    binary = shutil.which(app_name) or shutil.which(app_name.lower())
+    if binary:
+        try:
+            subprocess.Popen([binary], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(1.0)
+            return True
+        except Exception:
+            pass
+    try:
+        subprocess.run(["xdg-open", app_name], capture_output=True, timeout=5)
+        return True
+    except Exception:
+        pass
+    return False
+
+def open_app(parameters=None, response=None, player=None, session_memory=None) -> str:
+    app_name = (parameters or {}).get("app_name", "").strip()
+    if not app_name:
+        return "Lütfen hangi uygulamayı açmak istediğinizi belirtin, efendim."
+    system    = platform.system()
+    normalized = _normalize_app(app_name)
+    launcher  = {"Windows": _launch_windows_app, "Darwin": _launch_macos_app, "Linux": _launch_linux_app}.get(system)
+    if launcher is None:
+        return f"Desteklenmeyen OS: {system}"
+    if player:
+        player.write_log(f"[open_app] {app_name}")
+    try:
+        success = launcher(normalized)
+        if success:
+            return f"{app_name} başarıyla açıldı, efendim."
+        if normalized != app_name:
+            success = launcher(app_name)
+            if success:
+                return f"{app_name} başarıyla açıldı, efendim."
+        return f"{app_name} açılmaya çalışıldı, efendim. Yüklenmeye devam ediyor olabilir."
+    except Exception as e:
+        return f"{app_name} açılamadı, efendim: {e}"
+
+# ─────────────────────────────────────────────────────────────────
+#  HAVA DURUMU (weather_report)
+# ─────────────────────────────────────────────────────────────────
+def weather_action(parameters: dict, player=None, session_memory=None):
+    city = parameters.get("city")
+    time_ = parameters.get("time", "bugün")
+    if not city:
+        msg = "Efendim, hava durumu için şehir bilgisi eksik."
+        if player:
+            player.write_log(f"Vesper: {msg}")
+        return msg
+    city  = city.strip()
+    query = f"hava durumu {city} {time_}"
+    url   = f"https://www.google.com/search?q={quote_plus(query)}"
+    try:
+        webbrowser.open(url)
+    except Exception:
+        pass
+    msg = f"{city} için hava durumu gösteriliyor, efendim."
+    if player:
+        player.write_log(f"Vesper: {msg}")
+    return msg
+
+# ─────────────────────────────────────────────────────────────────
+#  MESAJ GÖNDERME (send_message)
+# ─────────────────────────────────────────────────────────────────
+def _open_app_for_msg(app_name: str) -> bool:
+    try:
+        pyautogui.press("win")
+        time.sleep(0.4)
+        pyautogui.write(app_name, interval=0.04)
+        time.sleep(0.5)
+        pyautogui.press("enter")
+        time.sleep(2.0)
+        return True
+    except Exception:
+        return False
+
+def _send_whatsapp(receiver: str, message: str) -> str:
+    try:
+        if not _open_app_for_msg("WhatsApp"):
+            return "WhatsApp açılamadı."
+        time.sleep(1.5)
+        pyautogui.hotkey("ctrl", "f")
+        time.sleep(0.4)
+        pyautogui.hotkey("ctrl", "a")
+        pyautogui.write(receiver, interval=0.04)
+        time.sleep(1.0)
+        pyautogui.press("enter")
+        time.sleep(0.8)
+        pyautogui.write(message, interval=0.03)
+        time.sleep(0.2)
+        pyautogui.press("enter")
+        return f"{receiver}'e WhatsApp mesajı gönderildi."
+    except Exception as e:
+        return f"WhatsApp hatası: {e}"
+
+def _send_telegram(receiver: str, message: str) -> str:
+    try:
+        if not _open_app_for_msg("Telegram"):
+            return "Telegram açılamadı."
+        time.sleep(1.5)
+        pyautogui.hotkey("ctrl", "f")
+        time.sleep(0.4)
+        pyautogui.write(receiver, interval=0.04)
+        time.sleep(1.0)
+        pyautogui.press("enter")
+        time.sleep(0.8)
+        pyautogui.write(message, interval=0.03)
+        time.sleep(0.2)
+        pyautogui.press("enter")
+        return f"{receiver}'e Telegram mesajı gönderildi."
+    except Exception as e:
+        return f"Telegram hatası: {e}"
+
+def _send_instagram(receiver: str, message: str) -> str:
+    try:
+        webbrowser.open("https://www.instagram.com/direct/new/")
+        time.sleep(3.5)
+        pyautogui.write(receiver, interval=0.05)
+        time.sleep(1.5)
+        pyautogui.press("down")
+        time.sleep(0.3)
+        pyautogui.press("enter")
+        time.sleep(0.5)
+        for _ in range(3):
+            pyautogui.press("tab")
+            time.sleep(0.1)
+        pyautogui.press("enter")
+        time.sleep(1.5)
+        pyautogui.write(message, interval=0.04)
+        time.sleep(0.2)
+        pyautogui.press("enter")
+        return f"{receiver}'e Instagram mesajı gönderildi."
+    except Exception as e:
+        return f"Instagram hatası: {e}"
+
+def send_message(parameters: dict, response=None, player=None, session_memory=None) -> str:
+    params       = parameters or {}
+    receiver     = params.get("receiver", "").strip()
+    message_text = params.get("message_text", "").strip()
+    platform_    = params.get("platform", "whatsapp").strip().lower()
+    if not receiver:
+        return "Kime mesaj gönderileceğini belirtin, efendim."
+    if not message_text:
+        return "Ne yazılacağını belirtin, efendim."
+    if player:
+        player.write_log(f"[msg] {platform_} → {receiver}")
+    if "whatsapp" in platform_ or "wp" in platform_:
+        return _send_whatsapp(receiver, message_text)
+    elif "telegram" in platform_ or "tg" in platform_:
+        return _send_telegram(receiver, message_text)
+    elif "instagram" in platform_ or "ig" in platform_:
+        return _send_instagram(receiver, message_text)
+    else:
+        return _send_whatsapp(receiver, message_text)
+
+# ─────────────────────────────────────────────────────────────────
+#  HATIRLATICI (reminder)
+# ─────────────────────────────────────────────────────────────────
+def reminder(parameters: dict, response=None, player=None, session_memory=None) -> str:
+    date_str = parameters.get("date")
+    time_str = parameters.get("time")
+    message  = parameters.get("message", "Hatırlatıcı")
+    if not date_str or not time_str:
+        return "Hatırlatıcı için tarih ve saat gerekli, efendim."
+    try:
+        target_dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+        if target_dt <= datetime.now():
+            return "Bu saat geçmişte kalmış, efendim."
+        task_name    = f"VesperReminder_{target_dt.strftime('%Y%m%d_%H%M')}"
+        safe_message = message.replace('"', '').replace("'", "").strip()[:200]
+        python_exe   = sys.executable
+        if python_exe.lower().endswith("python.exe"):
+            pythonw = python_exe.replace("python.exe", "pythonw.exe")
+            if os.path.exists(pythonw):
+                python_exe = pythonw
+        temp_dir      = os.environ.get("TEMP", "C:\\Temp")
+        notify_script = os.path.join(temp_dir, f"{task_name}.pyw")
+        script_code = f'''import sys, os, time
+try:
+    import winsound
+    for freq in [800, 1000, 1200]:
+        winsound.Beep(freq, 200)
+        time.sleep(0.1)
+except Exception: pass
+try:
+    from win10toast import ToastNotifier
+    ToastNotifier().show_toast("Vesper Hatırlatıcı", "{safe_message}", duration=15, threaded=False)
+except Exception:
+    try:
+        import subprocess
+        subprocess.run(["msg", "*", "/TIME:30", "{safe_message}"], shell=True)
+    except Exception: pass
+time.sleep(3)
+try: os.remove(__file__)
+except Exception: pass
+'''
+        with open(notify_script, "w", encoding="utf-8") as f:
+            f.write(script_code)
+        xml_content = f'''<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo><Description>Vesper Reminder: {safe_message}</Description></RegistrationInfo>
+  <Triggers><TimeTrigger>
+    <StartBoundary>{target_dt.strftime("%Y-%m-%dT%H:%M:%S")}</StartBoundary>
+    <Enabled>true</Enabled>
+  </TimeTrigger></Triggers>
+  <Actions><Exec>
+    <Command>{python_exe}</Command>
+    <Arguments>"{notify_script}"</Arguments>
+  </Exec></Actions>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <WakeToRun>true</WakeToRun>
+    <ExecutionTimeLimit>PT5M</ExecutionTimeLimit>
+    <Enabled>true</Enabled>
+  </Settings>
+  <Principals><Principal>
+    <LogonType>InteractiveToken</LogonType>
+    <RunLevel>LeastPrivilege</RunLevel>
+  </Principal></Principals>
+</Task>'''
+        xml_path = os.path.join(temp_dir, f"{task_name}.xml")
+        with open(xml_path, "w", encoding="utf-16") as f:
+            f.write(xml_content)
+        result = subprocess.run(
+            f'schtasks /Create /TN "{task_name}" /XML "{xml_path}" /F',
+            shell=True, capture_output=True, text=True
+        )
+        try:
+            os.remove(xml_path)
+        except Exception:
+            pass
+        if result.returncode != 0:
+            try:
+                os.remove(notify_script)
+            except Exception:
+                pass
+            return "Hatırlatıcı zamanlanamadı, efendim."
+        if player:
+            player.write_log(f"[reminder] {date_str} {time_str}")
+        return f"Hatırlatıcı {target_dt.strftime('%d %B %Y %H:%M')} için ayarlandı, efendim."
+    except ValueError:
+        return "Tarih/saat formatı anlaşılamadı, efendim."
+    except Exception as e:
+        return f"Hatırlatıcı ayarlanırken hata: {str(e)[:80]}"
+
+# ─────────────────────────────────────────────────────────────────
+#  BİLGİSAYAR AYARLARI (computer_settings)
+# ─────────────────────────────────────────────────────────────────
+_OS = platform.system()
+
+def _vol_up():
+    if _OS == "Windows":
+        for _ in range(5): pyautogui.press("volumeup")
+    elif _OS == "Darwin":
+        subprocess.run(["osascript", "-e", "set volume output volume (output volume of (get volume settings) + 10)"])
+    else:
+        subprocess.run(["pactl", "set-sink-volume", "@DEFAULT_SINK@", "+10%"])
+
+def _vol_down():
+    if _OS == "Windows":
+        for _ in range(5): pyautogui.press("volumedown")
+    elif _OS == "Darwin":
+        subprocess.run(["osascript", "-e", "set volume output volume (output volume of (get volume settings) - 10)"])
+    else:
+        subprocess.run(["pactl", "set-sink-volume", "@DEFAULT_SINK@", "-10%"])
+
+def _vol_mute():
+    if _OS == "Windows":   pyautogui.press("volumemute")
+    elif _OS == "Darwin":  subprocess.run(["osascript", "-e", "set volume with output muted"])
+    else:                  subprocess.run(["pactl", "set-sink-mute", "@DEFAULT_SINK@", "toggle"])
+
+def _vol_set(value: int):
+    value = max(0, min(100, value))
+    if _OS == "Darwin":
+        subprocess.run(["osascript", "-e", f"set volume output volume {value}"])
+    elif _OS == "Linux":
+        subprocess.run(["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{value}%"])
+    else:
+        try:
+            from ctypes import cast, POINTER
+            from comtypes import CLSCTX_ALL
+            from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+            import math
+            devices   = AudioUtilities.GetSpeakers()
+            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+            vol       = cast(interface, POINTER(IAudioEndpointVolume))
+            vol_db    = -65.25 if value == 0 else max(-65.25, 20 * math.log10(value / 100))
+            vol.SetMasterVolumeLevel(vol_db, None)
+        except Exception as e:
+            logger.warning(f"Ses seviyesi ayarlanamadı: {e}")
+
+def _close_app():
+    if _OS == "Darwin": pyautogui.hotkey("command", "q")
+    else:               pyautogui.hotkey("alt", "f4")
+
+def _full_screen():
+    if _OS == "Darwin": pyautogui.hotkey("ctrl", "command", "f")
+    else:               pyautogui.press("f11")
+
+def _minimize():
+    if _OS == "Darwin": pyautogui.hotkey("command", "m")
+    else:               pyautogui.hotkey("win", "down")
+
+def _maximize():
+    if _OS == "Darwin":
+        subprocess.run(["osascript", "-e", 'tell application "System Events" to keystroke "f" using {control down, command down}'])
+    else:
+        pyautogui.hotkey("win", "up")
+
+def _screenshot_hotkey():
+    if _OS == "Windows":   pyautogui.hotkey("win", "shift", "s")
+    elif _OS == "Darwin":  pyautogui.hotkey("command", "shift", "3")
+    else:                  pyautogui.hotkey("ctrl", "print_screen")
+
+def _lock_screen():
+    if _OS == "Windows":   pyautogui.hotkey("win", "l")
+    elif _OS == "Darwin":  subprocess.run(["pmset", "displaysleepnow"])
+    else:                  subprocess.run(["gnome-screensaver-command", "-l"])
+
+def _shutdown():
+    if _OS == "Windows":   subprocess.run(["shutdown", "/s", "/t", "5"])
+    elif _OS == "Darwin":  subprocess.run(["osascript", "-e", 'tell application "System Events" to shut down'])
+    else:                  subprocess.run(["sudo", "shutdown", "-h", "now"])
+
+def _restart():
+    if _OS == "Windows":   subprocess.run(["shutdown", "/r", "/t", "5"])
+    elif _OS == "Darwin":  subprocess.run(["osascript", "-e", 'tell application "System Events" to restart'])
+    else:                  subprocess.run(["sudo", "reboot"])
+
+def _sleep_display():
+    if _OS == "Windows":
+        try:
+            ctypes.windll.user32.SendMessageW(0xFFFF, 0x0112, 0xF170, 2)
+        except Exception:
+            pass
+    elif _OS == "Darwin":  subprocess.run(["pmset", "displaysleepnow"])
+    else:                  subprocess.run(["xset", "dpms", "force", "off"])
+
+CS_ACTION_MAP = {
+    "volume_up": _vol_up, "volume_down": _vol_down, "mute": _vol_mute, "unmute": _vol_mute,
+    "increase_volume": _vol_up, "decrease_volume": _vol_down, "louder": _vol_up, "quieter": _vol_down,
+    "close_app": _close_app, "close_window": _close_app, "quit_app": _close_app,
+    "full_screen": _full_screen, "fullscreen": _full_screen,
+    "minimize": _minimize, "minimize_window": _minimize,
+    "maximize": _maximize, "maximize_window": _maximize,
+    "screenshot": _screenshot_hotkey, "take_screenshot": _screenshot_hotkey,
+    "lock_screen": _lock_screen, "lock": _lock_screen,
+    "shutdown": _shutdown, "shut_down": _shutdown, "power_off": _shutdown,
+    "restart": _restart, "reboot": _restart,
+    "sleep_display": _sleep_display, "turn_off_screen": _sleep_display, "screen_off": _sleep_display,
+    "switch_window": lambda: pyautogui.hotkey("alt", "tab"),
+    "show_desktop": lambda: pyautogui.hotkey("win", "d") if _OS == "Windows" else None,
+    "open_settings": lambda: pyautogui.hotkey("win", "i") if _OS == "Windows" else None,
+    "file_explorer": lambda: pyautogui.hotkey("win", "e") if _OS == "Windows" else None,
+    "new_tab": lambda: pyautogui.hotkey("ctrl", "t"),
+    "close_tab": lambda: pyautogui.hotkey("ctrl", "w"),
+    "refresh_page": lambda: pyautogui.press("f5"),
+    "go_back": lambda: pyautogui.hotkey("alt", "left"),
+    "go_forward": lambda: pyautogui.hotkey("alt", "right"),
+    "zoom_in": lambda: pyautogui.hotkey("ctrl", "equal"),
+    "zoom_out": lambda: pyautogui.hotkey("ctrl", "minus"),
+    "zoom_reset": lambda: pyautogui.hotkey("ctrl", "0"),
+    "save": lambda: pyautogui.hotkey("ctrl", "s"),
+    "undo": lambda: pyautogui.hotkey("ctrl", "z"),
+    "redo": lambda: pyautogui.hotkey("ctrl", "y"),
+    "copy": lambda: pyautogui.hotkey("ctrl", "c"),
+    "paste": lambda: pyautogui.hotkey("ctrl", "v"),
+    "cut": lambda: pyautogui.hotkey("ctrl", "x"),
+    "select_all": lambda: pyautogui.hotkey("ctrl", "a"),
+    "enter": lambda: pyautogui.press("enter"),
+    "escape": lambda: pyautogui.press("escape"),
+    "scroll_up": lambda: pyautogui.scroll(500),
+    "scroll_down": lambda: pyautogui.scroll(-500),
+    "task_manager": lambda: pyautogui.hotkey("ctrl", "shift", "esc"),
+}
+
+def _detect_cs_action(description: str) -> dict:
+    if not _GENAI:
+        return {"action": description.lower().replace(" ", "_"), "value": None}
+    genai.configure(api_key=_get_api_key())
+    model = genai.GenerativeModel(GEMINI_LITE)
+    available = ", ".join(sorted(CS_ACTION_MAP.keys())) + ", volume_set, type_text, press_key"
+    prompt = (
+        f'Kullanıcı bilgisayarını kontrol etmek istiyor.\n'
+        f'Kullanıcı dedi (herhangi bir dilde): "{description}"\n'
+        f'Mevcut eylemler: {available}\n\n'
+        f'YALNIZCA geçerli JSON döndür: {{"action": "eylem_adı", "value": null_veya_değer}}\n'
+        f'Örnekler:\n'
+        f'- "sesi aç" → {{"action": "volume_up", "value": null}}\n'
+        f'- "sesi 60 yap" → {{"action": "volume_set", "value": 60}}\n'
+        f'- "ekranı kapat" → {{"action": "sleep_display", "value": null}}\n'
+        f'- "bilgisayarı kapat" → {{"action": "shutdown", "value": null}}'
+    )
+    try:
+        response = model.generate_content(prompt)
+        text = re.sub(r"```(?:json)?", "", response.text).strip().rstrip("`").strip()
+        return json.loads(text)
+    except Exception as e:
+        logger.warning(f"Eylem tespiti başarısız: {e}")
+        return {"action": description.lower().replace(" ", "_"), "value": None}
+
+def computer_settings(parameters: dict, response=None, player=None, session_memory=None) -> str:
+    if not _PYAUTOGUI:
+        return "pyautogui kurulu değil. pip install pyautogui"
+    params      = parameters or {}
+    raw_action  = params.get("action", "").strip()
+    description = params.get("description", "").strip()
+    value       = params.get("value", None)
+    if not raw_action and description:
+        detected   = _detect_cs_action(description)
+        raw_action = detected.get("action", "")
+        if value is None:
+            value = detected.get("value")
+    action = raw_action.lower().strip().replace(" ", "_").replace("-", "_")
+    if not action:
+        return "Eylem tespit edilemedi, efendim."
+    if action == "volume_set":
+        try:
+            _vol_set(int(value or 50))
+            return f"Ses %{value} olarak ayarlandı."
+        except Exception as e:
+            return f"Ses ayarlanamadı: {e}"
+    if action in ("type_text", "write_on_screen", "type", "write"):
+        text = str(value or params.get("text", ""))
+        if not text:
+            return "Yazılacak metin belirtilmedi, efendim."
+        if _PYPERCLIP:
+            pyperclip.copy(text)
+            time.sleep(0.1)
+            pyautogui.hotkey("ctrl", "v")
+        else:
+            pyautogui.write(str(text), interval=0.03)
+        return f"Yazıldı: {text[:60]}"
+    if action == "press_key":
+        key = str(value or params.get("key", ""))
+        if not key:
+            return "Tuş belirtilmedi, efendim."
+        pyautogui.press(key)
+        return f"Tuşa basıldı: {key}"
+    func = CS_ACTION_MAP.get(action)
+    if not func:
+        return f"Bilinmeyen eylem: '{raw_action}', efendim."
+    try:
+        func()
+        return f"Tamamlandı: {action}."
+    except Exception as e:
+        return f"Eylem başarısız ({action}): {e}"
+
+# ─────────────────────────────────────────────────────────────────
+#  EKRAN İŞLEMCİ (screen_processor)
+# ─────────────────────────────────────────────────────────────────
+IMG_MAX_W = 640
+IMG_MAX_H = 360
+JPEG_Q    = 55
+
+SCREEN_SYSTEM_PROMPT = (
+    "Sen Vesper'sin. Görselleri teknik hassasiyetle analiz et. "
+    "J.A.R.V.I.S. gibi zekice, sadık ve öz cevap veren bir erkek asistan ol. "
+    "Maksimum 2 kısa cümle. Kullanıcıya 'Efendim' diye hitap et."
+)
+
+def _to_jpeg(img_bytes: bytes) -> bytes:
+    if not _PIL:
+        return img_bytes
+    img = PIL.Image.open(io.BytesIO(img_bytes)).convert("RGB")
+    img.thumbnail([IMG_MAX_W, IMG_MAX_H], PIL.Image.BILINEAR)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=JPEG_Q, optimize=False)
+    return buf.getvalue()
+
+def _capture_screenshot_bytes() -> bytes:
+    if not _MSS:
+        raise RuntimeError("mss kurulu değil")
+    with mss.mss() as sct:
+        shot      = sct.grab(sct.monitors[1])
+        png_bytes = mss.tools.to_png(shot.rgb, shot.size)
+    return _to_jpeg(png_bytes)
+
+def _get_camera_index() -> int:
+    try:
+        with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        if "camera_index" in cfg:
+            return int(cfg["camera_index"])
+    except Exception:
+        pass
+    best_index = 0
+    if _CV2:
+        for idx in range(6):
+            cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW if _OS == "Windows" else 0)
+            if not cap.isOpened():
+                cap.release()
+                continue
+            for _ in range(5):
+                cap.read()
+            ret, frame = cap.read()
+            cap.release()
+            if ret and frame is not None and frame.mean() > 5:
+                best_index = idx
+                break
+    try:
+        cfg = {}
+        if API_CONFIG_PATH.exists():
+            with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+        cfg["camera_index"] = best_index
+        with open(API_CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=4)
+    except Exception:
+        pass
+    return best_index
+
+def _capture_camera_bytes() -> bytes:
+    if not _CV2:
+        raise RuntimeError("opencv-python kurulu değil")
+    camera_index = _get_camera_index()
+    cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW if _OS == "Windows" else 0)
+    if not cap.isOpened():
+        raise RuntimeError(f"Kamera açılamadı: {camera_index}")
+    for _ in range(10):
+        cap.read()
+    ret, frame = cap.read()
+    cap.release()
+    if not ret or frame is None:
+        raise RuntimeError("Kamera karesi alınamadı.")
+    if _PIL:
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        img = PIL.Image.fromarray(rgb)
+        img.thumbnail([IMG_MAX_W, IMG_MAX_H], PIL.Image.BILINEAR)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=JPEG_Q, optimize=False)
+        return buf.getvalue()
+    _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_Q])
+    return buf.tobytes()
+
+class _LiveVisionSession:
+    def __init__(self):
+        self._loop      = None
+        self._thread    = None
+        self._session   = None
+        self._out_queue = None
+        self._audio_in  = None
+        self._ready     = threading.Event()
+        self._player    = None
+        self._pya       = pyaudio.PyAudio() if _PYAUDIO else None
+
+    def start(self, player=None):
+        if self._thread and self._thread.is_alive():
+            return
+        self._player = player
+        self._thread = threading.Thread(target=self._run_loop, daemon=True, name="VisionSessionThread")
+        self._thread.start()
+        ok = self._ready.wait(timeout=20)
+        if not ok:
+            raise RuntimeError("Vision session 20 saniyede başlamadı.")
+
+    def _run_loop(self):
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
+        self._loop.run_until_complete(self._main())
+
+    async def _main(self):
+        self._out_queue = asyncio.Queue(maxsize=30)
+        self._audio_in  = asyncio.Queue()
+        client = google_genai.Client(api_key=_get_api_key(), http_options={"api_version": "v1beta"})
+        config = genai_types.LiveConnectConfig(
+            response_modalities=["AUDIO"],
+            output_audio_transcription={},
+            system_instruction=SCREEN_SYSTEM_PROMPT,
+            speech_config=genai_types.SpeechConfig(
+                voice_config=genai_types.VoiceConfig(
+                    prebuilt_voice_config=genai_types.PrebuiltVoiceConfig(voice_name="Puck")
+                )
+            ),
+        )
+        while True:
+            try:
+                async with client.aio.live.connect(model=LIVE_MODEL, config=config) as session:
+                    self._session = session
+                    self._ready.set()
+                    async with asyncio.TaskGroup() as tg:
+                        tg.create_task(self._send_loop())
+                        tg.create_task(self._recv_loop())
+                        tg.create_task(self._play_loop())
+            except Exception as e:
+                print(f"[ScreenProcess] ⚠ Bağlantı kesildi: {e} — yeniden bağlanıyor...")
+                self._session = None
+                self._ready.clear()
+                await asyncio.sleep(2)
+                self._ready.set()
+
+    async def _send_loop(self):
+        while True:
+            item = await self._out_queue.get()
+            if self._session:
+                image_bytes, mime_type, user_text = item
+                try:
+                    b64 = base64.b64encode(image_bytes).decode("utf-8")
+                    await self._session.send_client_content(
+                        turns={"parts": [
+                            {"inline_data": {"mime_type": mime_type, "data": b64}},
+                            {"text": user_text}
+                        ]},
+                        turn_complete=True
+                    )
+                except Exception as e:
+                    print(f"[ScreenProcess] ⚠ Gönderme hatası: {e}")
+
+    async def _recv_loop(self):
+        transcript_buf = []
+        try:
+            async for response in self._session.receive():
+                if response.data:
+                    await self._audio_in.put(response.data)
+                sc = response.server_content
+                if not sc:
+                    continue
+                if sc.output_transcription and sc.output_transcription.text:
+                    chunk = sc.output_transcription.text.strip()
+                    if chunk:
+                        transcript_buf.append(chunk)
+                if sc.turn_complete:
+                    if transcript_buf and self._player:
+                        full = re.sub(r'\s+', ' ', " ".join(transcript_buf)).strip()
+                        if full:
+                            self._player.write_log(f"Vesper: {full}")
+                    transcript_buf = []
+        except Exception as e:
+            print(f"[ScreenProcess] ⚠ Alma hatası: {e}")
+            await asyncio.sleep(0.3)
+
+    async def _play_loop(self):
+        if not self._pya:
+            return
+        stream = await asyncio.to_thread(
+            self._pya.open, format=PA_FORMAT, channels=CHANNELS, rate=RECEIVE_SAMPLE_RATE, output=True
+        )
+        try:
+            while True:
+                chunk = await self._audio_in.get()
+                await asyncio.to_thread(stream.write, chunk)
+        finally:
+            stream.close()
+
+    def analyze(self, image_bytes: bytes, mime_type: str, user_text: str):
+        if not self._loop:
+            return
+        asyncio.run_coroutine_threadsafe(
+            self._out_queue.put((image_bytes, mime_type, user_text)), self._loop
+        )
+
+    def is_ready(self) -> bool:
+        return self._session is not None
+
+_live_vision       = _LiveVisionSession()
+_vision_started    = False
+_vision_start_lock = threading.Lock()
+
+def _ensure_vision_started(player=None):
+    global _vision_started
+    with _vision_start_lock:
+        if not _vision_started and _GENAI and _PYAUDIO:
+            _live_vision.start(player=player)
+            _vision_started = True
+        elif player is not None:
+            _live_vision._player = player
+
+def screen_process(parameters: dict, response=None, player=None, session_memory=None) -> bool:
+    user_text = (parameters or {}).get("text") or (parameters or {}).get("user_text", "")
+    user_text = (user_text or "").strip()
+    if not user_text:
+        print("[ScreenProcess] ⚠ user_text gerekli.")
+        return False
+    angle = (parameters or {}).get("angle", "screen").lower().strip()
+    _ensure_vision_started(player=player)
+    try:
+        if angle == "camera":
+            image_bytes = _capture_camera_bytes()
+            mime_type   = "image/jpeg"
+        else:
+            image_bytes = _capture_screenshot_bytes()
+            mime_type   = "image/jpeg" if _PIL else "image/png"
+    except Exception as e:
+        print(f"[ScreenProcess] ❌ Yakalama hatası: {e}")
+        return False
+    _live_vision.analyze(image_bytes, mime_type, user_text)
+    return True
+
+# ─────────────────────────────────────────────────────────────────
+#  YOUTUBE (youtube_video)
+# ─────────────────────────────────────────────────────────────────
+YT_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+def _extract_video_id(url: str) -> str | None:
+    match = re.search(r"(?:v=|/v/|youtu\.be/|/embed/|/shorts/)([A-Za-z0-9_-]{11})", url)
+    return match.group(1) if match else None
+
+def _is_valid_youtube_url(url: str) -> bool:
+    return bool(re.search(r"(youtube\.com|youtu\.be)", url or ""))
+
+def _get_yt_transcript(video_id: str) -> str | None:
+    if not _TRANSCRIPT:
+        return None
+    try:
+        tl = YouTubeTranscriptApi.list_transcripts(video_id)
+        transcript = None
+        try:
+            transcript = tl.find_manually_created_transcript(["tr", "en", "de", "fr", "es"])
+        except Exception:
+            try:
+                transcript = tl.find_generated_transcript(["tr", "en", "de", "fr", "es"])
+            except Exception:
+                for t in tl:
+                    transcript = t
+                    break
+        if transcript is None:
+            return None
+        fetched = transcript.fetch()
+        return " ".join(entry["text"] for entry in fetched)
+    except Exception as e:
+        logger.warning(f"Transkript alınamadı: {e}")
+        return None
+
+def _yt_summarize(transcript: str) -> str:
+    if not _GENAI:
+        return transcript[:500]
+    genai.configure(api_key=_get_api_key())
+    model = genai.GenerativeModel(
+        model_name=GEMINI_MODEL,
+        system_instruction=(
+            "Sen Vesper'sin. YouTube video transkriptlerini kısa özetle. "
+            "1 cümle genel bakış + 3-5 madde. 'Efendim' diye hitap et."
+        )
+    )
+    max_chars = 80000
+    truncated = transcript[:max_chars] + ("..." if len(transcript) > max_chars else "")
+    response  = model.generate_content(f"Bu transkripti özetle:\n\n{truncated}")
+    return response.text.strip()
+
+def _yt_find_thumbnails() -> list:
+    if not (_CV2 and _NUMPY and _PYAUTOGUI):
+        return []
+    try:
+        from PIL import ImageGrab
+        screenshot = ImageGrab.grab()
+        img        = np.array(screenshot)
+        screen_h, screen_w = img.shape[:2]
+        roi_top    = int(screen_h * 0.10)
+        roi_bottom = int(screen_h * 0.75)
+        roi_left   = int(screen_w * 0.20)
+        roi_right  = int(screen_w * 0.80)
+        roi        = img[roi_top:roi_bottom, roi_left:roi_right]
+        gray       = cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY)
+        edges      = cv2.Canny(gray, 30, 100)
+        kernel     = np.ones((3, 3), np.uint8)
+        edges      = cv2.dilate(edges, kernel, iterations=2)
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        candidates = []
+        for c in contours:
+            x, y, w, h = cv2.boundingRect(c)
+            area  = w * h
+            ratio = w / h if h > 0 else 0
+            if area < 15000 or not (1.4 < ratio < 2.2):
+                continue
+            cx_ = x + w // 2 + roi_left
+            cy_ = y + h // 2 + roi_top
+            candidates.append((cx_, cy_, area))
+        filtered = []
+        for cx_, cy_, area in sorted(candidates, key=lambda c: c[1]):
+            if not any(abs(cx_ - fx) < 80 and abs(cy_ - fy) < 80 for fx, fy in filtered):
+                filtered.append((cx_, cy_))
+        return filtered
+    except Exception as e:
+        logger.warning(f"Thumbnail tespiti başarısız: {e}")
+        return []
+
+def youtube_video(parameters: dict, response=None, player=None, session_memory=None, speak=None) -> str:
+    params = parameters or {}
+    action = params.get("action", "play").lower().strip()
+    if player:
+        player.write_log(f"YouTube: {action}")
+    try:
+        if action == "play":
+            query = params.get("query", "").strip()
+            if not query:
+                return "Ne izlemek istediğinizi söyleyin, efendim."
+            url = f"https://www.youtube.com/results?search_query={query.replace(' ', '+')}"
+            webbrowser.open(url)
+            time.sleep(2.0)
+            thumbnails = _yt_find_thumbnails()
+            if len(thumbnails) >= 2:
+                x, y = thumbnails[1]
+                pyautogui.click(x, y)
+                return f"YouTube videosu oynatılıyor: {query}"
+            elif len(thumbnails) == 1:
+                x, y = thumbnails[0]
+                pyautogui.click(x, y)
+                return f"YouTube videosu oynatılıyor: {query}"
+            else:
+                screen_w, screen_h = pyautogui.size()
+                pyautogui.click(screen_w // 2, int(screen_h * 0.45))
+                return f"YouTube videosu oynatılmaya çalışıldı: {query}"
+
+        elif action == "summarize":
+            url = params.get("url", "").strip()
+            if not url or not _is_valid_youtube_url(url):
+                return "Geçerli bir YouTube URL'si sağlayın, efendim."
+            video_id = _extract_video_id(url)
+            if not video_id:
+                return "Video ID çıkarılamadı, efendim."
+            if speak:
+                speak("Transkript alınıyor, efendim. Bir dakika.")
+            transcript = _get_yt_transcript(video_id)
+            if not transcript:
+                return "Bu video için transkript bulunamadı, efendim."
+            summary = _yt_summarize(transcript)
+            if speak:
+                speak(summary)
+            return summary
+
+        elif action == "trending":
+            region = params.get("region", "TR").upper()
+            if not _REQUESTS:
+                return "requests kütüphanesi kurulu değil."
+            url     = f"https://www.youtube.com/feed/trending?gl={region}"
+            r       = requests.get(url, headers=YT_HEADERS, timeout=12)
+            titles  = re.findall(r'"title":\{"runs":\[\{"text":"([^"]+)"', r.text)
+            results = []
+            seen    = set()
+            for title in titles:
+                if title in seen or len(title) < 5:
+                    continue
+                seen.add(title)
+                results.append(f"{len(results)+1}. {title}")
+                if len(results) >= 8:
+                    break
+            return f"Trend ({region}):\n" + "\n".join(results) if results else f"{region} için trend bulunamadı."
+
+        else:
+            return f"Bilinmeyen YouTube eylemi: '{action}'"
+    except Exception as e:
+        return f"YouTube {action} hatası: {e}"
+
+# ─────────────────────────────────────────────────────────────────
+#  MASAÜSTÜ KONTROLÜ (desktop_control)
+# ─────────────────────────────────────────────────────────────────
+FILE_TYPE_MAP_DT = {
+    "Görseller":   [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg", ".ico"],
+    "Belgeler":    [".pdf", ".doc", ".docx", ".txt", ".xls", ".xlsx", ".ppt", ".pptx", ".csv"],
+    "Videolar":    [".mp4", ".avi", ".mkv", ".mov", ".wmv", ".flv", ".webm"],
+    "Müzik":       [".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma"],
+    "Arşivler":    [".zip", ".rar", ".7z", ".tar", ".gz"],
+    "Kod":         [".py", ".js", ".html", ".css", ".json", ".xml", ".ts", ".cpp", ".java"],
+    "Yürütülebilir": [".exe", ".msi", ".bat", ".cmd", ".sh"],
+}
+
+def _organize_desktop_files(mode: str = "by_type") -> str:
+    desktop = Path.home() / "Desktop"
+    moved   = []
+    for item in desktop.iterdir():
+        if item.is_dir() or item.name.startswith(".") or item.suffix.lower() == ".lnk":
+            continue
+        if mode == "by_date":
+            mtime       = datetime.fromtimestamp(item.stat().st_mtime)
+            folder_name = mtime.strftime("%Y-%m")
+        else:
+            ext         = item.suffix.lower()
+            folder_name = "Diğer"
+            for folder, exts in FILE_TYPE_MAP_DT.items():
+                if ext in exts:
+                    folder_name = folder
+                    break
+        target_dir = desktop / folder_name
+        target_dir.mkdir(exist_ok=True)
+        new_path = target_dir / item.name
+        if not new_path.exists():
+            shutil.move(str(item), str(new_path))
+            moved.append(f"{item.name} → {folder_name}/")
+    return f"Masaüstü düzenlendi. {len(moved)} dosya taşındı." + ("\n" + "\n".join(moved[:8]) if moved else "")
+
+def _set_wallpaper(image_path: str) -> str:
+    path = Path(image_path).expanduser().resolve()
+    if not path.exists():
+        return f"Görsel bulunamadı: {image_path}"
+    try:
+        if sys.platform == "win32":
+            ctypes.windll.user32.SystemParametersInfoW(20, 0, str(path.resolve()), 3)
+            return f"Duvar kağıdı ayarlandı: {path.name}"
+        elif sys.platform == "darwin":
+            script = f'tell application "Finder" to set desktop picture to POSIX file "{path}"'
+            subprocess.run(["osascript", "-e", script])
+            return f"Duvar kağıdı ayarlandı: {path.name}"
+        else:
+            subprocess.run(["gsettings", "set", "org.gnome.desktop.background", "picture-uri", f"file://{path}"])
+            return f"Duvar kağıdı ayarlandı: {path.name}"
+    except Exception as e:
+        return f"Duvar kağıdı ayarlanamadı: {e}"
+
+def _list_desktop() -> str:
+    desktop = Path.home() / "Desktop"
+    items   = []
+    for item in sorted(desktop.iterdir()):
+        if item.name.startswith("."):
+            continue
+        if item.is_dir():
+            items.append(f"📁 {item.name}/")
+        else:
+            size = item.stat().st_size
+            items.append(f"📄 {item.name} ({size/1024:.1f} KB)")
+    return f"Masaüstü ({len(items)} öğe):\n" + "\n".join(items) if items else "Masaüstü boş."
+
+def desktop_control(parameters: dict, response=None, player=None, session_memory=None) -> str:
+    action = (parameters or {}).get("action", "").lower().strip()
+    task   = (parameters or {}).get("task", "").strip()
+    try:
+        if action == "wallpaper":
+            return _set_wallpaper(parameters.get("path", ""))
+        elif action in ("organize", "düzenle"):
+            return _organize_desktop_files(parameters.get("mode", "by_type"))
+        elif action == "list":
+            return _list_desktop()
+        elif action == "clean":
+            desktop     = Path.home() / "Desktop"
+            today       = datetime.now().strftime("%Y-%m-%d")
+            archive_dir = desktop / f"Vesper Arşiv {today}"
+            archive_dir.mkdir(exist_ok=True)
+            moved = 0
+            for item in desktop.iterdir():
+                if item.is_dir() or item.name.startswith(".") or item.suffix.lower() == ".lnk":
+                    continue
+                new_path = archive_dir / item.name
+                if not new_path.exists():
+                    shutil.move(str(item), str(new_path))
+                    moved += 1
+            return f"Masaüstü temizlendi. {moved} dosya '{archive_dir.name}' klasörüne taşındı."
+        elif task:
+            if not _GENAI:
+                return "Google Generative AI kurulu değil."
+            genai.configure(api_key=_get_api_key())
+            model = genai.GenerativeModel(GEMINI_MODEL)
+            response_txt = model.generate_content(
+                f"Masaüstü görevi: {task}\nGerekli Python kodunu yaz (pyautogui, pathlib, shutil kullanabilirsin)."
+            )
+            return response_txt.text.strip()
+        else:
+            return "Eylem belirtilmedi, efendim."
+    except Exception as e:
+        return f"Masaüstü kontrolü hatası: {e}"
+
+# ─────────────────────────────────────────────────────────────────
+#  TARAYICI KONTROLÜ (browser_control)
+# ─────────────────────────────────────────────────────────────────
+class _BrowserThread:
+    def __init__(self):
+        self._loop       = None
+        self._thread     = None
+        self._ready      = threading.Event()
+        self._playwright = None
+        self._browser    = None
+        self._context    = None
+        self._page       = None
+
+    def start(self):
+        if self._thread and self._thread.is_alive():
+            return
+        self._thread = threading.Thread(target=self._run_loop, daemon=True, name="BrowserThread")
+        self._thread.start()
+        self._ready.wait(timeout=15)
+
+    def _run_loop(self):
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
+        self._loop.run_until_complete(self._init())
+        self._ready.set()
+        self._loop.run_forever()
+
+    async def _init(self):
+        self._playwright = await async_playwright().start()
+
+    def run(self, coro, timeout: int = 30):
+        if not self._loop:
+            raise RuntimeError("BrowserThread başlatılmadı.")
+        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        return future.result(timeout=timeout)
+
+    async def _get_page(self):
+        if self._page is None or self._page.is_closed():
+            await self._launch()
+        return self._page
+
+    async def _launch(self):
+        launch_kwargs = {
+            "headless": False,
+            "args": ["--start-maximized", "--disable-blink-features=AutomationControlled"],
+            "ignore_default_args": ["--enable-automation"],
+        }
+        try:
+            if self._browser is None or not self._browser.is_connected():
+                self._browser = await self._playwright.chromium.launch(channel="chrome", **launch_kwargs)
+        except Exception:
+            self._browser = await self._playwright.chromium.launch(**launch_kwargs)
+        self._context = await self._browser.new_context(
+            viewport=None,
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            )
+        )
+        await self._context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        self._page = await self._context.new_page()
+
+    async def _go_to(self, url: str) -> str:
+        if not url.startswith("http"):
+            url = "https://" + url
+        page = await self._get_page()
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            return f"Açıldı: {page.url}"
+        except PlaywrightTimeout:
+            return f"Zaman aşımı: {url}"
+        except Exception as e:
+            return f"Navigasyon hatası: {e}"
+
+    async def _search(self, query: str, engine: str = "google") -> str:
+        engines = {
+            "google":     f"https://www.google.com/search?q={query.replace(' ', '+')}",
+            "bing":       f"https://www.bing.com/search?q={query.replace(' ', '+')}",
+            "duckduckgo": f"https://duckduckgo.com/?q={query.replace(' ', '+')}",
+        }
+        url = engines.get(engine.lower(), engines["google"])
+        return await self._go_to(url)
+
+    async def _click(self, selector=None, text=None) -> str:
+        page = await self._get_page()
+        try:
+            if text:
+                await page.get_by_text(text, exact=False).first.click(timeout=8000)
+                return f"Tıklandı: '{text}'"
+            elif selector:
+                await page.click(selector, timeout=8000)
+                return f"Tıklandı: {selector}"
+            return "Seçici veya metin belirtilmedi."
+        except Exception as e:
+            return f"Tıklama hatası: {e}"
+
+    async def _type(self, selector=None, text: str = "", clear_first: bool = True) -> str:
+        page = await self._get_page()
+        try:
+            element = page.locator(selector).first if selector else page.locator(":focus")
+            if clear_first:
+                await element.clear()
+            await element.type(text, delay=50)
+            return "Metin yazıldı."
+        except Exception as e:
+            return f"Yazma hatası: {e}"
+
+    async def _scroll(self, direction: str = "down", amount: int = 500) -> str:
+        page = await self._get_page()
+        try:
+            y = amount if direction == "down" else -amount
+            await page.mouse.wheel(0, y)
+            return f"Kaydırıldı: {direction}"
+        except Exception as e:
+            return f"Kaydırma hatası: {e}"
+
+    async def _press(self, key: str) -> str:
+        page = await self._get_page()
+        try:
+            await page.keyboard.press(key)
+            return f"Tuşa basıldı: {key}"
+        except Exception as e:
+            return f"Tuş hatası: {e}"
+
+    async def _get_text(self) -> str:
+        page = await self._get_page()
+        try:
+            text = await page.inner_text("body")
+            return text[:4000] if len(text) > 4000 else text
+        except Exception as e:
+            return f"Metin alınamadı: {e}"
+
+    async def _close(self) -> str:
+        if self._browser:
+            await self._browser.close()
+            self._browser = None
+            self._page    = None
+        if self._playwright:
+            await self._playwright.stop()
+            self._playwright = None
+        return "Tarayıcı kapatıldı."
+
+_bt          = _BrowserThread() if _PLAYWRIGHT else None
+_bt_started  = False
+_bt_lock     = threading.Lock()
+
+def _ensure_browser_started():
+    global _bt_started
+    if not _PLAYWRIGHT or _bt is None:
+        return
+    with _bt_lock:
+        if not _bt_started:
+            _bt.start()
+            _bt_started = True
+
+def browser_control(parameters: dict, response=None, player=None, session_memory=None) -> str:
+    if not _PLAYWRIGHT:
+        return "Playwright kurulu değil. pip install playwright && python -m playwright install"
+    _ensure_browser_started()
+    action = (parameters or {}).get("action", "").lower().strip()
+    result = "Bilinmeyen eylem."
+    try:
+        if action == "go_to":
+            result = _bt.run(_bt._go_to(parameters.get("url", "")))
+        elif action == "open":
+            url = parameters.get("url", parameters.get("query", ""))
+            if not url.startswith("http"):
+                url = "https://" + url
+            webbrowser.open(url)
+            result = f"Açıldı: {url}"
+        elif action == "search":
+            result = _bt.run(_bt._search(parameters.get("query", ""), parameters.get("engine", "google")))
+        elif action == "click":
+            result = _bt.run(_bt._click(selector=parameters.get("selector"), text=parameters.get("text")))
+        elif action == "type":
+            result = _bt.run(_bt._type(selector=parameters.get("selector"), text=parameters.get("text", ""), clear_first=parameters.get("clear_first", True)))
+        elif action == "scroll":
+            result = _bt.run(_bt._scroll(direction=parameters.get("direction", "down"), amount=parameters.get("amount", 500)))
+        elif action == "press":
+            result = _bt.run(_bt._press(parameters.get("key", "Enter")))
+        elif action == "get_text":
+            result = _bt.run(_bt._get_text())
+        elif action == "close":
+            result = _bt.run(_bt._close())
+        else:
+            result = f"Bilinmeyen tarayıcı eylemi: {action}"
+    except concurrent.futures.TimeoutError:
+        result = "Tarayıcı eylemi zaman aşımına uğradı."
+    except Exception as e:
+        result = f"Tarayıcı hatası: {e}"
+    if player:
+        player.write_log(f"[browser] {result[:60]}")
+    return result
+
+# ─────────────────────────────────────────────────────────────────
+#  KOD YARDIMCISI (code_helper)
+# ─────────────────────────────────────────────────────────────────
+MAX_BUILD_ATTEMPTS = 3
+
+def _clean_code(text: str) -> str:
+    text = text.strip()
+    text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
+    text = re.sub(r"\n?```$", "", text)
+    return text.strip()
+
+def _resolve_save_path(output_path: str, language: str) -> Path:
+    ext_map = {
+        "python": ".py", "py": ".py", "javascript": ".js", "js": ".js",
+        "typescript": ".ts", "ts": ".ts", "html": ".html", "css": ".css",
+        "java": ".java", "cpp": ".cpp", "c": ".c", "bash": ".sh",
+        "shell": ".sh", "powershell": ".ps1", "sql": ".sql", "json": ".json",
+        "rust": ".rs", "go": ".go",
+    }
+    if output_path:
+        p = Path(output_path)
+        return p if p.is_absolute() else Path.home() / "Desktop" / p
+    ext = ext_map.get((language or "python").lower(), ".py")
+    return Path.home() / "Desktop" / f"Vesper_code{ext}"
+
+def _ch_read_file(file_path: str) -> tuple:
+    if not file_path:
+        return "", "Dosya yolu belirtilmedi."
+    p = Path(file_path)
+    if not p.exists():
+        return "", f"Dosya bulunamadı: {file_path}"
+    try:
+        return p.read_text(encoding="utf-8"), ""
+    except Exception as e:
+        return "", f"Dosya okunamadı: {e}"
+
+def _ch_save_file(path: Path, content: str) -> str:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        return f"Kaydedildi: {path}"
+    except Exception as e:
+        return f"Kaydedilemedi: {e}"
+
+def _ch_has_error(output: str) -> bool:
+    return any(s in output.lower() for s in ["error", "exception", "traceback", "syntaxerror", "nameerror", "typeerror", "stderr", "failed"])
+
+def _ch_run_file(path: Path, args: list, timeout: int) -> str:
+    interp = {
+        ".py": [sys.executable], ".js": ["node"], ".ts": ["ts-node"],
+        ".sh": ["bash"], ".ps1": ["powershell", "-File"],
+    }.get(path.suffix.lower())
+    if not interp:
+        return f"Bu uzantı için yorumlayıcı yok: {path.suffix}"
+    try:
+        result = subprocess.run(
+            interp + [str(path)] + (args or []),
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=timeout, cwd=str(path.parent)
+        )
+        parts = []
+        if result.stdout.strip(): parts.append(f"Çıktı:\n{result.stdout.strip()}")
+        if result.stderr.strip(): parts.append(f"Hata:\n{result.stderr.strip()}")
+        return "\n\n".join(parts) if parts else "Çıktısız çalıştı."
+    except subprocess.TimeoutExpired:
+        return f"{timeout}s zaman aşımı."
+    except FileNotFoundError:
+        return f"Yorumlayıcı bulunamadı: {interp[0]}"
+    except Exception as e:
+        return f"Çalıştırma hatası: {e}"
+
+def code_helper(parameters: dict, response=None, player=None, session_memory=None, speak=None) -> str:
+    if not _GENAI:
+        return "google-generativeai kurulu değil."
+    p           = parameters or {}
+    action      = p.get("action", "write").lower().strip()
+    description = p.get("description", "").strip()
+    language    = p.get("language", "python").strip()
+    output_path = p.get("output_path", "").strip()
+    file_path   = p.get("file_path", "").strip()
+    code        = p.get("code", "").strip()
+    args        = p.get("args", [])
+    timeout     = int(p.get("timeout", 30))
+
+    genai.configure(api_key=_get_api_key())
+    model = genai.GenerativeModel(GEMINI_MODEL)
+
+    if action == "write":
+        if not description:
+            return "Ne yazılacağını açıklayın, efendim."
+        prompt = (
+            f"Sen uzman bir {language} geliştiricisisin.\n"
+            f"Şu iş için temiz, çalışan {language} kodu yaz:\n"
+            f"{description}\n\nSadece kod, açıklama yok:"
+        )
+        try:
+            resp = model.generate_content(prompt)
+            code = _clean_code(resp.text)
+            path = _resolve_save_path(output_path, language)
+            _ch_save_file(path, code)
+            return f"Kod yazıldı. Kaydedildi: {path}\n\nÖnizleme:\n{chr(10).join(code.splitlines()[:10])}"
+        except Exception as e:
+            return f"Kod yazılamadı: {e}"
+
+    elif action == "run":
+        if not file_path:
+            return "Çalıştırılacak dosyayı belirtin, efendim."
+        p_ = Path(file_path)
+        if not p_.exists():
+            return f"Dosya bulunamadı: {file_path}"
+        return _ch_run_file(p_, args, timeout)
+
+    elif action == "explain":
+        if file_path and not code:
+            code, err = _ch_read_file(file_path)
+            if err:
+                return err
+        if not code:
+            return "Kod veya dosya yolu belirtin, efendim."
+        prompt = f"Bu kodun ne yaptığını kısaca açıkla (3-5 cümle):\n\n{code[:4000]}"
+        try:
+            resp = model.generate_content(prompt)
+            return resp.text.strip()
+        except Exception as e:
+            return f"Açıklama hatası: {e}"
+
+    elif action == "edit":
+        if not file_path:
+            return "Düzenlenecek dosyayı belirtin, efendim."
+        content, err = _ch_read_file(file_path)
+        if err:
+            return err
+        instruction = description or p.get("instruction", "")
+        if not instruction:
+            return "Değişikliği açıklayın, efendim."
+        prompt = (
+            f"Bu kodu düzenle:\n{instruction}\n\nOrijinal:\n{content}\n\nSadece güncellenmiş kodu döndür:"
+        )
+        try:
+            resp   = model.generate_content(prompt)
+            edited = _clean_code(resp.text)
+            _ch_save_file(Path(file_path), edited)
+            return f"Dosya düzenlendi: {file_path}\n\nÖnizleme:\n{chr(10).join(edited.splitlines()[:10])}"
+        except Exception as e:
+            return f"Düzenleme hatası: {e}"
+
+    elif action == "build":
+        if not description:
+            return "Ne inşa edileceğini açıklayın, efendim."
+        lang = language or "python"
+        # Write
+        try:
+            resp = model.generate_content(
+                f"Uzman {lang} geliştirici. Şunu yaz:\n{description}\n\nSadece kod:"
+            )
+            code = _clean_code(resp.text)
+            path = _resolve_save_path(output_path, lang)
+            _ch_save_file(path, code)
+        except Exception as e:
+            return f"Başlangıç kodu yazılamadı: {e}"
+        # Run & fix loop
+        for attempt in range(1, MAX_BUILD_ATTEMPTS + 1):
+            out = _ch_run_file(path, args, timeout)
+            if not _ch_has_error(out):
+                msg = f"İnşaat tamamlandı, efendim. {attempt} denemede çalışıyor. Kaydedildi: {path}"
+                if speak: speak(msg)
+                return f"{msg}\n\nÇıktı:\n{out}"
+            if attempt == MAX_BUILD_ATTEMPTS:
+                break
+            try:
+                fix_resp = model.generate_content(
+                    f"Bu kodu düzelt:\nHata: {out[:1000]}\nKod: {code}\n\nDüzeltilmiş kod:"
+                )
+                code = _clean_code(fix_resp.text)
+                _ch_save_file(path, code)
+            except Exception:
+                break
+        msg = f"{MAX_BUILD_ATTEMPTS} denemede çalışan sürüm oluşturulamadı, efendim."
+        if speak: speak(msg)
+        return msg
+
+    else:
+        return f"Bilinmeyen code_helper eylemi: '{action}'"
+
+# ─────────────────────────────────────────────────────────────────
+#  GELİŞTİRİCİ AJAN (dev_agent)
+# ─────────────────────────────────────────────────────────────────
+MAX_FIX_ATTEMPTS = 4
+
+def dev_agent(parameters: dict, response=None, player=None, session_memory=None, speak=None) -> str:
+    if not _GENAI:
+        return "google-generativeai kurulu değil."
+    p            = parameters or {}
+    description  = p.get("description", "").strip()
+    language     = p.get("language", "python").strip()
+    project_name = p.get("project_name", "").strip()
+    timeout      = int(p.get("timeout", 30))
+    if not description:
+        return "Proje açıklaması gerekli, efendim."
+
+    def log(msg: str):
+        print(f"[DevAgent] {msg}")
+        if player: player.write_log(f"[DevAgent] {msg}")
+
+    genai.configure(api_key=_get_api_key())
+    planner = genai.GenerativeModel(GEMINI_MODEL)
+    writer  = genai.GenerativeModel(GEMINI_LITE)
+
+    log("Proje yapısı planlanıyor...")
+    plan_prompt = (
+        f"Proje planla. Dil: {language}. Açıklama: {description}\n\n"
+        "Sadece JSON döndür:\n"
+        '{"project_name":"ad","entry_point":"main.py","files":[{"path":"main.py","description":"açıklama"}],"run_command":"python main.py","dependencies":["paket"]}'
+    )
+    try:
+        resp = planner.generate_content(plan_prompt)
+        raw  = re.sub(r"```(?:json)?", "", resp.text).strip().rstrip("`").strip()
+        plan = json.loads(raw)
+    except Exception as e:
+        return f"Planlama hatası: {e}"
+
+    proj_name   = re.sub(r"[^\w\-]", "_", project_name or plan.get("project_name", "Vesper_project"))
+    project_dir = PROJECTS_DIR / proj_name
+    project_dir.mkdir(parents=True, exist_ok=True)
+    files        = plan.get("files", [])
+    entry_point  = plan.get("entry_point", "main.py")
+    run_command  = plan.get("run_command", f"python {entry_point}")
+    dependencies = plan.get("dependencies", [])
+
+    log(f"Proje: {proj_name} | Dosyalar: {len(files)} | Giriş: {entry_point}")
+
+    file_codes: dict[str, str] = {}
+    file_list_str = "\n".join(f"  - {f['path']}: {f['description']}" for f in files)
+
+    for file_info in files:
+        file_path = file_info.get("path", "")
+        file_desc = file_info.get("description", "")
+        if not file_path:
+            continue
+        log(f"{file_path} yazılıyor...")
+        try:
+            write_prompt = (
+                f"Uzman {language} geliştirici. Proje hedefi: {description}\n"
+                f"Tüm dosyalar:\n{file_list_str}\n\n"
+                f"Şu dosyayı yaz: {file_path}\nAmacı: {file_desc}\n\n"
+                "Sadece kod, açıklama yok:"
+            )
+            w_resp = writer.generate_content(write_prompt)
+            code   = _clean_code(w_resp.text)
+            full_p = project_dir / file_path
+            full_p.parent.mkdir(parents=True, exist_ok=True)
+            full_p.write_text(code, encoding="utf-8")
+            file_codes[file_path] = code
+            log(f"✅ {file_path}")
+        except Exception as e:
+            log(f"❌ {file_path}: {e}")
+
+    if not file_codes:
+        return "Hiçbir dosya yazılamadı, efendim."
+
+    if dependencies:
+        log(f"Bağımlılıklar yükleniyor: {dependencies}")
+        try:
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install"] + dependencies,
+                capture_output=True, text=True, timeout=120, cwd=str(project_dir)
+            )
+        except Exception as e:
+            log(f"Bağımlılık hatası: {e}")
+
+    # VSCode aç
+    try:
+        subprocess.Popen(["code", str(project_dir)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True)
+        time.sleep(2)
+    except Exception:
+        pass
+
+    # Run & fix
+    last_output = ""
+    for attempt in range(1, MAX_FIX_ATTEMPTS + 1):
+        log(f"Çalıştırılıyor (deneme {attempt}/{MAX_FIX_ATTEMPTS})...")
+        parts = run_command.split()
+        if parts[0] == "python":
+            parts[0] = sys.executable
+        try:
+            result = subprocess.run(
+                parts, capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=timeout, cwd=str(project_dir)
+            )
+            out   = result.stdout.strip()
+            err   = result.stderr.strip()
+            parts_ = []
+            if out: parts_.append(f"Çıktı:\n{out}")
+            if err: parts_.append(f"Hata:\n{err}")
+            last_output = "\n\n".join(parts_) if parts_ else "Çıktısız çalıştı."
+        except subprocess.TimeoutExpired:
+            last_output = f"{timeout}s zaman aşımı. (Uzun süreli uygulama çalışıyor olabilir.)"
+        except Exception as e:
+            last_output = f"Çalıştırma hatası: {e}"
+
+        has_error = any(s in last_output.lower() for s in ["error", "exception", "traceback", "failed"])
+        if not has_error or "zaman aşımı" in last_output:
+            msg = f"'{proj_name}' projesi çalışıyor, efendim. VSCode'da açıldı: {project_dir}"
+            if speak: speak(msg)
+            return f"{msg}\n\nÇıktı:\n{last_output}"
+
+        if attempt == MAX_FIX_ATTEMPTS:
+            break
+
+        # Hatalı dosyayı bul
+        error_file = entry_point
+        for fname in file_codes.keys():
+            if Path(fname).name in last_output or fname in last_output:
+                error_file = fname
+                break
+
+        log(f"'{error_file}' dosyasındaki hata düzeltiliyor...")
+        try:
+            fix_prompt = (
+                f"Bu dosyayı düzelt:\n{error_file}\n\n"
+                f"Hata:\n{last_output[:2000]}\n\n"
+                f"Mevcut kod:\n{file_codes.get(error_file, '')}\n\n"
+                "Sadece düzeltilmiş kodu döndür:"
+            )
+            fix_resp = planner.generate_content(fix_prompt)
+            fixed    = _clean_code(fix_resp.text)
+            (project_dir / error_file).write_text(fixed, encoding="utf-8")
+            file_codes[error_file] = fixed
+        except Exception as e:
+            log(f"Düzeltme başarısız: {e}")
+
+    msg = f"'{proj_name}' {MAX_FIX_ATTEMPTS} denemede çalıştırılamadı, efendim. Proje: {project_dir}"
+    if speak: speak(msg)
+    return f"{msg}\n\nSon hata:\n{last_output[:500]}"
+
+# ─────────────────────────────────────────────────────────────────
+#  WEB ARAMA (web_search)
+# ─────────────────────────────────────────────────────────────────
+def web_search_action(parameters: dict, response=None, player=None, session_memory=None) -> str:
+    if not _GENAI:
+        return "google-generativeai kurulu değil."
+    params = parameters or {}
+    query  = params.get("query", "").strip()
+    if not query:
+        return "Arama sorgusu belirtin, efendim."
+    if player:
+        player.write_log(f"Aranıyor: {query}")
+    results = []
+    try:
+        from duckduckgo_search import DDGS
+        with DDGS() as ddgs:
+            for r in ddgs.text(query, max_results=8):
+                results.append({
+                    "title":   r.get("title", ""),
+                    "snippet": r.get("body", r.get("snippet", "")),
+                    "url":     r.get("href", r.get("link", "")),
+                })
+    except Exception as e:
+        logger.warning(f"DuckDuckGo araması başarısız: {e}")
+    if not results:
+        return f"'{query}' için sonuç bulunamadı, efendim."
+    context = "\n".join([f"- {r['title']}: {r['snippet']} ({r['url']})" for r in results])
+    prompt  = (
+        f"Sorgu: {query}\n\nArama Sonuçları:\n{context}\n\n"
+        "Bu sonuçlara dayanarak kısa, akıllı bir cevap ver. "
+        "Kullanıcıya 'efendim' diye hitap et. Maksimum 3-4 cümle."
+    )
+    try:
+        client   = google_genai.Client(api_key=_get_api_key())
+        response = client.models.generate_content(model=GEMINI_LITE, contents=prompt)
+        return response.text.strip()
+    except Exception as e:
+        logger.error(f"Gemini özetleme hatası: {e}")
+        return "\n".join([f"{r['title']}\n{r['snippet']}\n" for r in results[:3]])
+
+# ─────────────────────────────────────────────────────────────────
+#  BİLGİSAYAR KONTROLÜ (computer_control)
+# ─────────────────────────────────────────────────────────────────
+_FIRST_NAMES = ["Alex", "Jordan", "Taylor", "Morgan", "Casey", "Riley", "Drew", "Quinn", "Avery", "Blake"]
+_LAST_NAMES  = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis", "Wilson"]
+_DOMAINS     = ["gmail.com", "yahoo.com", "outlook.com", "proton.me", "mail.com"]
+
+def _generate_random_data(data_type: str) -> str:
+    dt = data_type.lower().strip()
+    if dt == "first_name":  return random.choice(_FIRST_NAMES)
+    if dt == "last_name":   return random.choice(_LAST_NAMES)
+    if dt == "name":        return f"{random.choice(_FIRST_NAMES)} {random.choice(_LAST_NAMES)}"
+    if dt == "email":
+        first = random.choice(_FIRST_NAMES).lower()
+        last  = random.choice(_LAST_NAMES).lower()
+        return f"{first}.{last}{random.randint(10,999)}@{random.choice(_DOMAINS)}"
+    if dt == "username":    return f"{random.choice(_FIRST_NAMES).lower()}{random.randint(100,9999)}"
+    if dt == "password":
+        chars = string.ascii_letters + string.digits + "!@#$%"
+        pwd   = (
+            random.choice(string.ascii_uppercase) +
+            random.choice(string.digits) +
+            random.choice("!@#$%") +
+            "".join(random.choices(chars, k=9))
+        )
+        return "".join(random.sample(pwd, len(pwd)))
+    if dt == "phone":       return f"+90{random.randint(5000000000, 5999999999)}"
+    if dt == "birthday":
+        return f"{random.randint(1,28):02d}/{random.randint(1,12):02d}/{random.randint(1980,2000)}"
+    if dt == "zip_code":    return str(random.randint(10000, 99999))
+    return f"random_{data_type}_{random.randint(1000,9999)}"
+
+def computer_control(parameters: dict, response=None, player=None, session_memory=None) -> str:
+    if not _PYAUTOGUI:
+        return "pyautogui kurulu değil."
+    action = (parameters or {}).get("action", "").lower().strip()
+    if not action:
+        return "Eylem belirtin, efendim."
+    if player: player.write_log(f"[Computer] {action}")
+    print(f"[ComputerControl] ▶ {action}")
+    try:
+        if action == "type":
+            text = parameters.get("text", "")
+            time.sleep(0.3)
+            pyautogui.typewrite(text, interval=0.03)
+            return f"Yazıldı: {text[:50]}"
+        elif action == "smart_type":
+            text = parameters.get("text", "")
+            pyautogui.hotkey("ctrl", "a")
+            time.sleep(0.1)
+            if _PYPERCLIP and len(text) > 20:
+                pyperclip.copy(text)
+                time.sleep(0.1)
+                pyautogui.hotkey("ctrl", "v")
+            else:
+                pyautogui.typewrite(text, interval=0.04)
+            return f"Akıllı yazıldı: {text[:50]}"
+        elif action in ("click", "left_click"):
+            x = parameters.get("x")
+            y = parameters.get("y")
+            if x is not None and y is not None:
+                pyautogui.click(x, y)
+            else:
+                pyautogui.click()
+            return "Tıklandı."
+        elif action == "double_click":
+            x = parameters.get("x"); y = parameters.get("y")
+            if x is not None and y is not None:
+                pyautogui.click(x, y, clicks=2)
+            else:
+                pyautogui.click(clicks=2)
+            return "Çift tıklandı."
+        elif action == "right_click":
+            x = parameters.get("x"); y = parameters.get("y")
+            if x is not None and y is not None:
+                pyautogui.click(x, y, button="right")
+            else:
+                pyautogui.click(button="right")
+            return "Sağ tıklandı."
+        elif action == "hotkey":
+            keys = parameters.get("keys", "")
+            if isinstance(keys, str):
+                keys = [k.strip() for k in keys.split("+")]
+            pyautogui.hotkey(*keys)
+            return f"Kısayol: {'+'.join(keys)}"
+        elif action == "press":
+            pyautogui.press(parameters.get("key", "enter"))
+            return f"Tuşa basıldı: {parameters.get('key', 'enter')}"
+        elif action == "scroll":
+            direction = parameters.get("direction", "down")
+            amount    = int(parameters.get("amount", 3))
+            clicks    = amount if direction == "up" else -amount
+            pyautogui.scroll(clicks)
+            return f"Kaydırıldı: {direction}"
+        elif action == "move":
+            pyautogui.moveTo(int(parameters.get("x", 0)), int(parameters.get("y", 0)), duration=0.3)
+            return "Fare hareket etti."
+        elif action == "screenshot":
+            save_path = parameters.get("path") or str(Path.home() / "Desktop" / "Vesper_screenshot.png")
+            pyautogui.screenshot(save_path)
+            return f"Ekran görüntüsü kaydedildi: {save_path}"
+        elif action == "wait":
+            time.sleep(float(parameters.get("seconds", 1.0)))
+            return "Beklendi."
+        elif action == "random_data":
+            result = _generate_random_data(parameters.get("type", "name"))
+            return result
+        elif action == "copy":
+            if _PYPERCLIP: return pyperclip.paste()
+            pyautogui.hotkey("ctrl", "c")
+            return "Kopyalandı."
+        elif action == "paste":
+            text = parameters.get("text", "")
+            if _PYPERCLIP:
+                pyperclip.copy(text)
+                time.sleep(0.1)
+                pyautogui.hotkey("ctrl", "v")
+                return f"Yapıştırıldı: {text[:50]}"
+            return "pyperclip yok."
+        else:
+            return f"Bilinmeyen computer_control eylemi: '{action}'"
+    except Exception as e:
+        return f"computer_control hatası: {e}"
+
+# ─────────────────────────────────────────────────────────────────
+#  DOSYA KONTROLCÜSÜ (file_controller)
+# ─────────────────────────────────────────────────────────────────
+def _resolve_path(raw: str) -> Path:
+    shortcuts = {
+        "desktop": Path.home() / "Desktop", "downloads": Path.home() / "Downloads",
+        "documents": Path.home() / "Documents", "pictures": Path.home() / "Pictures",
+        "music": Path.home() / "Music", "videos": Path.home() / "Videos", "home": Path.home(),
+        "masaüstü": Path.home() / "Desktop", "indirilenler": Path.home() / "Downloads",
+        "belgeler": Path.home() / "Documents",
+    }
+    lower = raw.strip().lower()
+    if lower in shortcuts: return shortcuts[lower]
+    return Path(raw).expanduser()
+
+def _format_size(bytes_size: int) -> str:
+    for unit in ["B", "KB", "MB", "GB"]:
+        if bytes_size < 1024: return f"{bytes_size:.1f} {unit}"
+        bytes_size /= 1024
+    return f"{bytes_size:.1f} GB"
+
+def file_controller(parameters: dict, response=None, player=None, session_memory=None) -> str:
+    action  = (parameters or {}).get("action", "").lower().strip()
+    path    = (parameters or {}).get("path", "desktop")
+    name    = (parameters or {}).get("name", "")
+    content = (parameters or {}).get("content", "")
+
+    def full_path(p: str, n: str) -> Path:
+        base = _resolve_path(p)
+        return base / n if n else base
+
+    result = "Bilinmeyen eylem."
+    try:
+        if action == "list":
+            target = _resolve_path(path)
+            if not target.exists(): return f"Yol bulunamadı: {target}"
+            items = []
+            for item in sorted(target.iterdir()):
+                if item.name.startswith("."): continue
+                if item.is_dir(): items.append(f"📁 {item.name}/")
+                else:
+                    size = _format_size(item.stat().st_size)
+                    items.append(f"📄 {item.name} ({size})")
+            result = f"{target.name}/ içeriği ({len(items)} öğe):\n" + "\n".join(items) if items else "Boş dizin."
+
+        elif action == "create_file":
+            fp = full_path(path, name)
+            fp.parent.mkdir(parents=True, exist_ok=True)
+            fp.write_text(content, encoding="utf-8")
+            result = f"Dosya oluşturuldu: {fp.name}"
+
+        elif action == "create_folder":
+            fp = full_path(path, name)
+            fp.mkdir(parents=True, exist_ok=True)
+            result = f"Klasör oluşturuldu: {fp}"
+
+        elif action == "delete":
+            fp = full_path(path, name)
+            if not fp.exists(): return f"Bulunamadı: {fp}"
+            if _SEND2TRASH:
+                send2trash.send2trash(str(fp))
+                result = f"Geri dönüşüm kutusuna taşındı: {fp.name}"
+            else:
+                if fp.is_dir(): shutil.rmtree(fp)
+                else: fp.unlink()
+                result = f"Kalıcı olarak silindi: {fp.name}"
+
+        elif action == "move":
+            fp  = full_path(path, name)
+            dst = _resolve_path(parameters.get("destination", "desktop"))
+            if not fp.exists(): return f"Kaynak bulunamadı: {fp}"
+            if dst.is_dir(): dst = dst / fp.name
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(fp), str(dst))
+            result = f"Taşındı: {fp.name} → {dst.parent.name}/"
+
+        elif action == "copy":
+            fp  = full_path(path, name)
+            dst = _resolve_path(parameters.get("destination", "desktop"))
+            if not fp.exists(): return f"Kaynak bulunamadı: {fp}"
+            if dst.is_dir(): dst = dst / fp.name
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if fp.is_dir(): shutil.copytree(str(fp), str(dst))
+            else: shutil.copy2(str(fp), str(dst))
+            result = f"Kopyalandı: {fp.name} → {dst.parent.name}/"
+
+        elif action == "rename":
+            fp       = full_path(path, name)
+            new_name = parameters.get("new_name", "")
+            if not fp.exists(): return f"Bulunamadı: {fp}"
+            new_path = fp.parent / new_name
+            if new_path.exists(): return f"'{new_name}' adında dosya zaten var."
+            fp.rename(new_path)
+            result = f"Yeniden adlandırıldı: {fp.name} → {new_name}"
+
+        elif action == "read":
+            fp = full_path(path, name)
+            if not fp.exists(): return f"Dosya bulunamadı: {fp}"
+            content_ = fp.read_text(encoding="utf-8", errors="ignore")
+            if len(content_) > 3000: content_ = content_[:3000] + "...(kesildi)"
+            result = content_
+
+        elif action == "write":
+            fp = full_path(path, name)
+            fp.parent.mkdir(parents=True, exist_ok=True)
+            mode = "a" if parameters.get("append", False) else "w"
+            with open(fp, mode, encoding="utf-8") as f:
+                f.write(content)
+            result = f"Yazıldı: {fp.name}"
+
+        elif action == "find":
+            search_path = _resolve_path(path)
+            ext         = parameters.get("extension", "")
+            find_name   = name or parameters.get("name", "")
+            pattern     = f"*{ext}" if ext else "*"
+            results_    = []
+            for item in search_path.rglob(pattern):
+                if item.is_file():
+                    if find_name and find_name.lower() not in item.name.lower(): continue
+                    results_.append(f"📄 {item.name} ({_format_size(item.stat().st_size)}) — {item.parent}")
+                    if len(results_) >= 20: break
+            result = f"{len(results_)} dosya bulundu:\n" + "\n".join(results_) if results_ else "Dosya bulunamadı."
+
+        elif action == "disk_usage":
+            target = _resolve_path(path)
+            usage  = shutil.disk_usage(target)
+            result = (
+                f"Disk kullanımı ({target}):\n"
+                f"  Toplam: {_format_size(usage.total)}\n"
+                f"  Kullanılan: {_format_size(usage.used)} ({usage.used/usage.total*100:.1f}%)\n"
+                f"  Boş: {_format_size(usage.free)}"
+            )
+
+        elif action == "organize_desktop":
+            result = _organize_desktop_files()
+
+        else:
+            result = f"Bilinmeyen file_controller eylemi: '{action}'"
+
+    except Exception as e:
+        result = f"Dosya kontrolcüsü hatası: {e}"
+
+    if player: player.write_log(f"[file] {result[:60]}")
+    return result
+
+# ─────────────────────────────────────────────────────────────────
+#  CMD KONTROLÜ (cmd_control)
+# ─────────────────────────────────────────────────────────────────
+BLOCKED_PATTERNS_CMD = [
+    r"\brm\s+-rf\b", r"\brmdir\s+/s\b", r"\bdel\s+/[fqs]",
+    r"\bformat\b", r"\bdiskpart\b", r"\bfdisk\b",
+    r"\breg\s+(delete|add)\b", r"\bbcdedit\b",
+    r"\beval\b", r"\b__import__\b",
+]
+_CMD_BLOCKED_RE = re.compile("|".join(BLOCKED_PATTERNS_CMD), re.IGNORECASE)
+
+def _is_cmd_safe(command: str) -> tuple:
+    match = _CMD_BLOCKED_RE.search(command)
+    if match:
+        return False, f"Engellenen komut: '{match.group()}'"
+    return True, "OK"
+
+def _run_cmd_silent(command: str, timeout: int = 20) -> str:
+    try:
+        os_platform = platform.system()
+        if os_platform == "Windows":
+            is_ps = command.strip().lower().startswith("powershell")
+            if is_ps:
+                cmd_inner = re.sub(r'^powershell\s+"?', '', command, flags=re.IGNORECASE).rstrip('"')
+                result = subprocess.run(
+                    ["powershell", "-NoProfile", "-Command", cmd_inner],
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout
+                )
+            else:
+                result = subprocess.run(
+                    ["cmd", "/c", command],
+                    capture_output=True, text=True, encoding="cp1252", errors="replace",
+                    timeout=timeout, cwd=str(Path.home())
+                )
+        else:
+            shell = "/bin/zsh" if os_platform == "Darwin" else "/bin/bash"
+            result = subprocess.run(
+                command, shell=True, executable=shell,
+                capture_output=True, text=True, errors="replace",
+                timeout=timeout, cwd=str(Path.home())
+            )
+        output = result.stdout.strip()
+        error  = result.stderr.strip()
+        if output: return output[:2000]
+        if error:  return f"[stderr]: {error[:500]}"
+        return "Komut çıktısız çalıştı."
+    except subprocess.TimeoutExpired:
+        return f"Komut {timeout}s'de zaman aşımına uğradı."
+    except Exception as e:
+        return f"Çalıştırma hatası: {e}"
+
+def _run_cmd_visible(command: str) -> None:
+    try:
+        os_platform = platform.system()
+        if os_platform == "Windows":
+            subprocess.Popen(f'cmd /k "{command}"', creationflags=subprocess.CREATE_NEW_CONSOLE)
+        elif os_platform == "Darwin":
+            subprocess.Popen(["osascript", "-e", f'tell application "Terminal" to do script "{command}"'])
+        else:
+            for term in ["gnome-terminal", "xterm", "konsole"]:
+                try:
+                    subprocess.Popen([term, "--", "bash", "-c", f"{command}; exec bash"])
+                    break
+                except FileNotFoundError:
+                    continue
+    except Exception as e:
+        logger.warning(f"Terminal açma hatası: {e}")
+
+def cmd_control(parameters: dict, response=None, player=None, session_memory=None) -> str:
+    task    = (parameters or {}).get("task", "").strip()
+    command = (parameters or {}).get("command", "").strip()
+    visible = (parameters or {}).get("visible", True)
+    if not task and not command:
+        return "Ne yapmak istediğinizi açıklayın, efendim."
+    if not command and task and _GENAI:
+        genai.configure(api_key=_get_api_key())
+        model = genai.GenerativeModel(GEMINI_LITE)
+        prompt = (
+            f"Bu isteği tek bir Windows CMD komutuna çevir.\n"
+            f"Sadece komutu döndür, açıklama yok.\n"
+            f"Güvensizse: UNSAFE\n\n"
+            f"İstek: {task}\n\nKomut:"
+        )
+        try:
+            resp    = model.generate_content(prompt)
+            command = resp.text.strip().strip("`").strip()
+            if command == "UNSAFE":
+                return "Bu istek için güvenli komut oluşturulamadı, efendim."
+        except Exception as e:
+            return f"Komut oluşturulamadı: {e}"
+    safe, reason = _is_cmd_safe(command)
+    if not safe:
+        return f"Güvenlik nedeniyle engellendi: {reason}"
+    if player: player.write_log(f"[CMD] {command[:60]}")
+    if any(x in command.lower() for x in ["notepad", "explorer", "start "]):
+        subprocess.Popen(command, shell=True)
+        return f"Açıldı: {command}"
+    if visible:
+        _run_cmd_visible(command)
+        output = _run_cmd_silent(command)
+        return f"Terminal açıldı.\n\nÇıktı:\n{output}"
+    else:
+        return _run_cmd_silent(command)
+
+# ─────────────────────────────────────────────────────────────────
+#  MODÜL BİLDİRİMLERİ (Tool declarations for Live API)
+# ─────────────────────────────────────────────────────────────────
+MODULE_DECLARATIONS = [
+    {"name": "open_app",          "description": "Sistem uygulamalarını açar.",
+     "parameters": {"type": "OBJECT", "properties": {"app_name": {"type": "STRING"}}, "required": ["app_name"]}},
+    {"name": "web_search",        "description": "İnternet üzerinde bilgi arar.",
+     "parameters": {"type": "OBJECT", "properties": {"query": {"type": "STRING"}}, "required": ["query"]}},
+    {"name": "weather_report",    "description": "Hava durumu gösterir.",
+     "parameters": {"type": "OBJECT", "properties": {"city": {"type": "STRING"}}, "required": ["city"]}},
+    {"name": "send_message",      "description": "WhatsApp, Telegram veya Instagram mesajı gönderir.",
+     "parameters": {"type": "OBJECT", "properties": {"receiver": {"type": "STRING"}, "message_text": {"type": "STRING"}, "platform": {"type": "STRING"}}, "required": ["receiver", "message_text"]}},
+    {"name": "reminder",          "description": "Belirli tarih ve saat için hatırlatıcı kurar.",
+     "parameters": {"type": "OBJECT", "properties": {"date": {"type": "STRING"}, "time": {"type": "STRING"}, "message": {"type": "STRING"}}, "required": ["date", "time", "message"]}},
+    {"name": "computer_settings", "description": "Ses, parlaklık, pencere yönetimi gibi sistem ayarlarını kontrol eder.",
+     "parameters": {"type": "OBJECT", "properties": {"action": {"type": "STRING"}, "description": {"type": "STRING"}, "value": {"type": "STRING"}}, "required": []}},
+    {"name": "screen_process",    "description": "Ekranı veya kamerayı analiz eder.",
+     "parameters": {"type": "OBJECT", "properties": {"text": {"type": "STRING"}, "angle": {"type": "STRING"}}, "required": ["text"]}},
+    {"name": "youtube_video",     "description": "YouTube videosu oynatır veya özetler.",
+     "parameters": {"type": "OBJECT", "properties": {"action": {"type": "STRING"}, "query": {"type": "STRING"}, "url": {"type": "STRING"}}, "required": []}},
+    {"name": "desktop_control",   "description": "Masaüstünü yönetir.",
+     "parameters": {"type": "OBJECT", "properties": {"action": {"type": "STRING"}, "task": {"type": "STRING"}, "path": {"type": "STRING"}}, "required": []}},
+    {"name": "browser_control",   "description": "Web tarayıcısını kontrol eder.",
+     "parameters": {"type": "OBJECT", "properties": {"action": {"type": "STRING"}, "url": {"type": "STRING"}, "query": {"type": "STRING"}, "text": {"type": "STRING"}}, "required": []}},
+    {"name": "code_helper",       "description": "Kod yazma, düzenleme, çalıştırma yardımı.",
+     "parameters": {"type": "OBJECT", "properties": {"action": {"type": "STRING"}, "description": {"type": "STRING"}, "language": {"type": "STRING"}}, "required": ["description"]}},
+    {"name": "dev_agent",         "description": "Açıklamadan tam proje inşa eder.",
+     "parameters": {"type": "OBJECT", "properties": {"description": {"type": "STRING"}, "language": {"type": "STRING"}, "project_name": {"type": "STRING"}}, "required": ["description"]}},
+    {"name": "computer_control",  "description": "Fare ve klavye kontrolü.",
+     "parameters": {"type": "OBJECT", "properties": {"action": {"type": "STRING"}, "text": {"type": "STRING"}, "x": {"type": "INTEGER"}, "y": {"type": "INTEGER"}}, "required": []}},
+    {"name": "file_controller",   "description": "Dosya ve klasör yönetimi.",
+     "parameters": {"type": "OBJECT", "properties": {"action": {"type": "STRING"}, "path": {"type": "STRING"}, "name": {"type": "STRING"}}, "required": []}},
+    {"name": "cmd_control",       "description": "Kabuk komutları çalıştırır.",
+     "parameters": {"type": "OBJECT", "properties": {"command": {"type": "STRING"}}, "required": ["command"]}},
+    {"name": "vision_control",    "description": "Görsel analiz modunu açıp kapar.",
+     "parameters": {"type": "OBJECT", "properties": {"mode": {"type": "STRING", "enum": ["on", "off"]}}, "required": ["mode"]}},
+]
+
+# ─────────────────────────────────────────────────────────────────
+#  VİZYON İZLEYİCİ & PROAKTIF HEARTBEAT
+# ─────────────────────────────────────────────────────────────────
+class VisionWatcher:
+    def __init__(self, ui):
+        self.ui     = ui
+        self.active = True
+
+    def start(self):
+        def loop():
+            while self.active:
+                try:
+                    if _PYAUTOGUI:
+                        SENSORY_HUB["visual_context"] = "Windows Masaüstü görünür. Kullanıcı aktif."
+                except Exception:
+                    pass
+                time.sleep(120)
+        threading.Thread(target=loop, daemon=True).start()
+
+class ProactiveHeartbeat:
+    def __init__(self, ui):
+        self.ui = ui
+
+    def start(self):
+        def loop():
+            while True:
+                if _PSUTIL:
+                    cpu = psutil.cpu_percent()
+                    if cpu > 85:
+                        SENSORY_HUB["system_health"] = f"Yüksek Yük (CPU: {cpu}%)"
+                        if self.ui: self.ui.write_log(f"UYARI: CPU yükü yüksek ({cpu}%)")
+                    else:
+                        SENSORY_HUB["system_health"] = "Stabil"
+                time.sleep(15)
+        threading.Thread(target=loop, daemon=True).start()
+
+# ─────────────────────────────────────────────────────────────────
+#  ANA CANLII OTURUM (VesperLive)
+# ─────────────────────────────────────────────────────────────────
+class VesperLive:
+    def __init__(self, ui):
+        self.ui             = ui
+        self.session        = None
+        self.audio_in_queue = None
+        self.out_queue      = None
+        self._loop          = None
+        self.vision_watcher = VisionWatcher(self.ui)
+        self.ui.core = self
+
+    def _build_config(self):
+        return genai_types.LiveConnectConfig(
+            response_modalities=["AUDIO"],
+            output_audio_transcription={},
+            input_audio_transcription={},
+            system_instruction=_get_full_prompt(),
+            tools=[{"function_declarations": MODULE_DECLARATIONS}],
+            session_resumption=genai_types.SessionResumptionConfig(),
+            speech_config=genai_types.SpeechConfig(
+                voice_config=genai_types.VoiceConfig(
+                    prebuilt_voice_config=genai_types.PrebuiltVoiceConfig(voice_name="Puck")
+                )
+            ),
+        )
+
+    async def _execute_tool(self, fc) -> genai_types.FunctionResponse:
+        name   = fc.name
+        args   = dict(fc.args or {})
+        loop   = asyncio.get_event_loop()
+        result = "Onaylandı."
+
+        TOOL_MAP = {
+            "open_app":          lambda: open_app(parameters=args, player=self.ui),
+            "web_search":        lambda: web_search_action(parameters=args, player=self.ui),
+            "weather_report":    lambda: weather_action(parameters=args, player=self.ui),
+            "send_message":      lambda: send_message(parameters=args, player=self.ui),
+            "reminder":          lambda: reminder(parameters=args, player=self.ui),
+            "computer_settings": lambda: computer_settings(parameters=args, player=self.ui),
+            "youtube_video":     lambda: youtube_video(parameters=args, player=self.ui),
+            "desktop_control":   lambda: desktop_control(parameters=args, player=self.ui),
+            "browser_control":   lambda: browser_control(parameters=args, player=self.ui),
+            "code_helper":       lambda: code_helper(parameters=args, player=self.ui),
+            "dev_agent":         lambda: dev_agent(parameters=args, player=self.ui),
+            "computer_control":  lambda: computer_control(parameters=args, player=self.ui),
+            "file_controller":   lambda: file_controller(parameters=args, player=self.ui),
+            "cmd_control":       lambda: cmd_control(parameters=args, player=self.ui),
+        }
+
+        try:
+            if name in TOOL_MAP:
+                r = await loop.run_in_executor(None, TOOL_MAP[name])
+                result = r or f"{name} işlendi."
+            elif name == "screen_process":
+                threading.Thread(
+                    target=screen_process,
+                    kwargs={"parameters": args, "player": self.ui},
+                    daemon=True
+                ).start()
+                result = "Ekran analizi başlatıldı..."
+            elif name == "vision_control":
+                mode = args.get("mode", "off")
+                self.vision_watcher.active = (mode == "on")
+                result = f"Görsel izleme {mode}, efendim."
+            else:
+                result = f"{name} komutu işlendi."
+        except Exception as e:
+            result = f"Hata: {e}"
+
+        return genai_types.FunctionResponse(id=fc.id, name=name, response={"result": result})
+
+    async def _send_realtime(self):
+        while True:
+            msg = await self.out_queue.get()
+            if self.session:
+                try:
+                    await self.session.send_realtime_input(media=msg)
+                except Exception:
+                    pass
+
+    async def _listen_audio(self):
+        logger.info("🎤 Mikrofon aktif")
+        pya    = pyaudio.PyAudio()
+        stream = await asyncio.to_thread(
+            pya.open, format=PA_FORMAT, channels=CHANNELS, rate=SEND_SAMPLE_RATE,
+            input=True, frames_per_buffer=CHUNK_SIZE
+        )
+        try:
+            while True:
+                data = await asyncio.to_thread(stream.read, CHUNK_SIZE, exception_on_overflow=False)
+                # LAF KESME (Barge-in) için mikrofonun her zaman veri göndermesi gerekir.
+                # 'if not self.ui.speaking' kontrolünü kaldırıyoruz.
+                await self.out_queue.put({"data": data, "mime_type": "audio/pcm"})
+        except Exception as e:
+            logger.error(f"🎤 Mikrofon hatası: {e}")
+            raise
+        finally:
+            stream.close()
+            pya.terminate()
+
+    async def _receive_audio(self):
+        logger.info("👂 Alıcı aktif")
+        try:
+            while True:
+                if not self.session:
+                    break
+                turn = self.session.receive()
+                async for response in turn:
+                    if not self.session:
+                        break
+                    if response.data:
+                        self.audio_in_queue.put_nowait(response.data)
+                    if response.server_content:
+                        sc = response.server_content
+                        it = getattr(sc, "input_transcription", None) or getattr(sc, "input_audio_transcription", None)
+                        if it and it.text:
+                            user_text = it.text.lower()
+                            logger.info(f"KULLANICI: {it.text}")
+                            self.ui.write_log(f"Sen: {it.text}")
+                            # LAF KESME (Barge-in manually)
+                            if any(word in user_text for word in ["dur", "sus", "anlatım", "yeter", "kes", "iptal", "tamam"]):
+                                while not self.audio_in_queue.empty():
+                                    self.audio_in_queue.get_nowait()
+                                self.ui.stop_speaking()
+                                self.ui.write_log("SYS: Anlaşıldı, susuyorum efendim.")
+                        ot = getattr(sc, "output_transcription", None) or getattr(sc, "output_audio_transcription", None)
+                        if ot and ot.text:
+                            logger.info(f"Vesper: {ot.text}")
+                            self.ui.write_log(f"Vesper: {ot.text}")
+                        if sc.interrupted:
+                            while not self.audio_in_queue.empty():
+                                self.audio_in_queue.get_nowait()
+                            self.ui.stop_speaking()
+                            self.ui.write_log("SYS: Kesildi.")
+                    if response.tool_call:
+                        fn_responses = []
+                        for fc in response.tool_call.function_calls:
+                            logger.info(f"🔧 Araç: {fc.name}")
+                            fr = await self._execute_tool(fc)
+                            fn_responses.append(fr)
+                        await self.session.send_tool_response(function_responses=fn_responses)
+        except Exception as e:
+            logger.error(f"👂 Alıcı hatası: {e}")
+            traceback.print_exc()
+
+    async def _play_audio(self):
+        logger.info("🔊 Hoparlör aktif")
+        pya    = pyaudio.PyAudio()
+        stream = await asyncio.to_thread(
+            pya.open, format=PA_FORMAT, channels=CHANNELS, rate=RECEIVE_SAMPLE_RATE,
+            output=True, frames_per_buffer=1024
+        )
+        try:
+            while True:
+                if self.audio_in_queue is None:
+                    await asyncio.sleep(0.1)
+                    continue
+                chunk = await self.audio_in_queue.get()
+                self.ui.start_speaking()
+                await asyncio.to_thread(stream.write, chunk)
+                if self.audio_in_queue.empty():
+                    self.ui.stop_speaking()
+        except Exception as e:
+            logger.error(f"🔊 Hoparlör hatası: {e}")
+            raise
+        finally:
+            stream.close()
+            pya.terminate()
+
+    async def run_session(self):
+        logger.info("🚀 Vesper Neural Hub başlatılıyor...")
+        while not self.ui._api_key_ready:
+            logger.info("⚠ API anahtarı bekleniyor...")
+            await asyncio.sleep(2)
+
+        self.vision_watcher.start()
+        ProactiveHeartbeat(self.ui).start()
+
+        while True:
+            try:
+                self.audio_in_queue = asyncio.Queue()
+                self.out_queue      = asyncio.Queue(maxsize=100)
+                client = google_genai.Client(api_key=_get_api_key(), http_options={"api_version": "v1alpha"})
+                async with (
+                    client.aio.live.connect(model=LIVE_MODEL, config=self._build_config()) as session,
+                    asyncio.TaskGroup() as tg
+                ):
+                    self.session = session
+                    self._loop   = asyncio.get_event_loop()
+                    self.ui.write_log("SYS: Vesper Neural Engine ÇEVRİMİÇİ.")
+                    logger.info("✨ Bağlantı kuruldu.")
+                    try:
+                        await session.send_realtime_input(text="Çevrim içi ve emrinizdeyim, efendim.")
+                    except Exception:
+                        pass
+                    tg.create_task(self._send_realtime())
+                    tg.create_task(self._listen_audio())
+                    tg.create_task(self._receive_audio())
+                    tg.create_task(self._play_audio())
+            except Exception as e:
+                logger.error(f"❌ Hub çöktü: {e}")
+                await asyncio.sleep(2)
+
+    def start(self):
+        threading.Thread(target=lambda: asyncio.run(self.run_session()), daemon=True).start()
+        self.ui.root.mainloop()
+
+# ─────────────────────────────────────────────────────────────────
+#  Vesper UI (monitor)
+# ─────────────────────────────────────────────────────────────────
+class VesperUI:
+    def __init__(self):
+        if not _TK:
+            raise RuntimeError("tkinter kurulu değil.")
+        self.root = tk.Tk()
+        self.root.title(SYSTEM_NAME)
+        
+        # İkon yükleme
+        try:
+            icon_path = BASE_DIR / "Vesper.png"
+            if icon_path.exists():
+                from PIL import Image, ImageTk
+                img = Image.open(icon_path)
+                photo = ImageTk.PhotoImage(img)
+                self.root.iconphoto(True, photo)
+                self.root._icon = photo # Çöp toplama engelleyici
+        except Exception as e:
+            print(f"[Vesper] ⚠ İkon yüklenemedi: {e}")
+
+        self.root.resizable(False, False)
+
+        W, H = 1200, 900
+        sw   = self.root.winfo_screenwidth()
+        sh   = self.root.winfo_screenheight()
+        self.root.geometry(f"{W}x{H}+{(sw-W)//2}+{(sh-H)//2}")
+        self.root.configure(bg=C_BG)
+
+        self.W, self.H     = W, H
+        self.tick          = 0
+        self.speaking      = False
+        self.status_text   = "NEURAL LINK AKTİF"
+        self.typing_queue  = deque()
+        self.is_typing     = False
+        self.visual_status = "AWARE"
+        self.health_status = "STABİL"
+        self.alert_text    = ""
+        self.core          = None
+
+        # Logo yükleme kaldırıldı - Kullanıcı isteği üzerine V harfi kullanılacak
+        self.logo_img = None
+
+        self.canvas = tk.Canvas(self.root, width=W, height=H, bg=C_BG, highlightthickness=0)
+        self.canvas.place(x=0, y=0)
+
+        # Log terminali
+        self.log_frame = tk.Frame(self.root, bg="#050008", highlightbackground=C_PRIMARY, highlightthickness=1)
+        self.log_text  = tk.Text(
+            self.log_frame, bg="#050008", fg=C_PRIMARY,
+            font=("Consolas", 11), borderwidth=0, padx=15, pady=12
+        )
+        self.log_text.pack(fill="both", expand=True)
+        self.log_text.configure(state="disabled")
+
+        # Manuel Chat Girişi
+        self.chat_entry = tk.Entry(
+            self.log_frame, bg="#0a0a0a", fg=C_SECONDARY,
+            insertbackground=C_SECONDARY, font=("Consolas", 12),
+            borderwidth=0, relief="flat", highlightthickness=1, highlightbackground="#1a1a1a"
+        )
+        self.chat_entry.pack(fill="x", side="bottom", padx=15, pady=(0, 10))
+        self.chat_entry.bind("<Return>", self._on_chat_submit)
+        self.chat_entry.insert(0, "Komut yazın...")
+        self.chat_entry.bind("<FocusIn>", lambda e: self.chat_entry.delete(0, tk.END) if self.chat_entry.get() == "Komut yazın..." else None)
+
+        self._api_key_ready = False
+        # Hardcoded key kontrolü or dosya kontrolü
+        if _get_api_key():
+            self._api_key_ready = True
+        elif API_CONFIG_PATH.exists():
+            try:
+                with open(API_CONFIG_PATH, "r") as f:
+                    data = json.load(f)
+                    if data.get("gemini_api_key"):
+                        self._api_key_ready = True
+            except Exception:
+                pass
+
+        if not self._api_key_ready:
+            self.root.withdraw()
+            self._show_setup_ui()
+        else:
+            self._start_engine()
+
+    def _start_engine(self):
+        self.root.deiconify()
+        self._animate()
+        self.root.protocol("WM_DELETE_WINDOW", lambda: os._exit(0))
+
+    def _animate(self):
+        self.tick += 1
+        self._draw()
+        self.root.after(30, self._animate)
+
+    def _draw(self):
+        c  = self.canvas
+        c.delete("all")
+        cx = self.W // 2
+        cy = self.H // 2 - 80
+        t  = self.tick
+
+        # 1. ARKA PLAN IZGARA (Derinlik efekti için iki katman)
+        spacing = 60
+        offset  = (t % spacing)
+        for i in range(-spacing, self.W + spacing, spacing):
+            # Dikey çizgiler (kayan)
+            c.create_line(i + offset, 0, i + offset, self.H, fill="#051529", width=1)
+            # Yatay çizgiler
+            c.create_line(0, i, self.W, i, fill="#051529", width=1)
+
+        # 2. DIŞ SİNYAL HALKASI (Kesikli ve yavaş dönen)
+        r_outer = 320
+        c.create_oval(cx-r_outer, cy-r_outer, cx+r_outer, cy+r_outer, outline=C_GLOW, width=1)
+        self._draw_arc_ring(cx, cy, r_outer + 5, t * 0.2, 20, C_SECONDARY, 1)
+        self._draw_arc_ring(cx, cy, r_outer + 5, t * 0.2 + 180, 20, C_SECONDARY, 1)
+
+        # 3. JARVIS HEXAGONAL HUD (Altıgenimsi yapı)
+        r_hex = 280
+        points = []
+        for i in range(0, 360, 60):
+            ang = math.radians(i + t * 0.1)
+            px = cx + r_hex * math.cos(ang)
+            py = cy + r_hex * math.sin(ang)
+            points.append((px, py))
+            # Köşelerde küçük veri noktaları
+            c.create_oval(px-2, py-2, px+2, py+2, fill=C_SECONDARY, outline="")
+        
+        for i in range(len(points)):
+            p1 = points[i]
+            p2 = points[(i+1)%len(points)]
+            c.create_line(p1[0], p1[1], p2[0], p2[1], fill=C_GLOW, width=1, dash=(2, 4))
+
+        # 4. VERİ AKIŞ HALKASI (Dönen kodlar)
+        r_data = 240
+        for i in range(0, 360, 30):
+            ang = math.radians(i - t * 0.8)
+            x = cx + r_data * math.cos(ang)
+            y = cy + r_data * math.sin(ang)
+            txt = random.choice(["01", "AI", "JARVIS", "W", "Ω", "∑", "∞"])
+            c.create_text(x, y, text=txt, fill=C_SECONDARY, font=("Consolas", 7), angle=-(i - t * 0.8))
+
+        # 5. ANA ENERJİ HALKASI (Nabız atan altın sarısı)
+        pulse = math.sin(t * 0.15) * 8
+        r_core = 180 + pulse
+        c.create_oval(cx-r_core, cy-r_core, cx+r_core, cy+r_core, outline=C_PRIMARY, width=2)
+        # Dönel segmentler
+        self._draw_arc_ring(cx, cy, r_core - 5, t * 2, 60, C_PRIMARY, 4)
+        self._draw_arc_ring(cx, cy, r_core - 5, t * 2 + 180, 60, C_PRIMARY, 4)
+
+        # 6. SES VİSÜALİZATÖRÜ (Merkezden dışa fışkıran barlar)
+        r_inner = 130
+        for i in range(0, 360, 6):
+            ang = math.radians(i)
+            # Eğer konuşuyorsa rastgele zıpla, konuşmuyorsa hafif dalgalan
+            if self.speaking:
+                h = random.randint(10, 60)
+            else:
+                h = 10 + math.sin(t * 0.1 + i * 0.5) * 10
+            
+            x1 = cx + r_inner * math.cos(ang)
+            y1 = cy + r_inner * math.sin(ang)
+            x2 = cx + (r_inner + h) * math.cos(ang)
+            y2 = cy + (r_inner + h) * math.sin(ang)
+            
+            color = C_PRIMARY if h < 45 else C_ALERT
+            c.create_line(x1, y1, x2, y2, fill=color, width=2)
+
+        # 7. MERKEZ SEMBOL (V)
+        pulse = math.sin(t * 0.15) * 8
+        c.create_oval(cx-60, cy-60, cx+60, cy+60, fill=C_BG, outline=C_SECONDARY, width=2)
+        c.create_text(cx, cy, text="V", fill=C_PRIMARY if not self.speaking else C_ALERT,
+                      font=("Verdana", 42, "bold"))
+        # Parlama halkası (V için geri getirildi)
+        r_glow = 75 + pulse
+        c.create_oval(cx-r_glow, cy-r_glow, cx+r_glow, cy+r_glow, outline=C_PRIMARY if not self.speaking else C_ALERT, width=1)
+        # İç minik dönen element
+        self._draw_arc_ring(cx, cy, 50, t * -4, 90, C_SECONDARY, 2)
+
+        # 8. HUD BİLGİ PANELLERİ
+        # Sol Üst: Sistem Kimliği
+        c.create_text(50, 40, text="◈ Vesper PROTOCOL — NEURAL CORE v3.1",
+                      fill=C_PRIMARY, font=("Verdana", 12, "bold"), anchor="w")
+        c.create_line(50, 55, 350, 55, fill=C_PRIMARY, width=1)
+        
+        # Sağ Üst: Zaman ve Koordinat (Sahte)
+        c.create_text(self.W-50, 40, text=time.strftime("%H:%M:%S"),
+                      fill=C_PRIMARY, font=("Consolas", 16, "bold"), anchor="e")
+        c.create_text(self.W-50, 60, text=f"LAT: 41.0082 | LON: 28.9784",
+                      fill=C_SECONDARY, font=("Consolas", 8), anchor="e")
+
+        # Sol Alt: Sensör ve Sağlık HUD
+        hud_x, hud_y = 40, 100
+        c.create_rectangle(hud_x, hud_y, hud_x+180, hud_y+110, outline=C_SECONDARY, width=1, fill="#051529")
+        c.create_text(hud_x+10, hud_y+15, text="SİSTEM DURUMU", fill=C_SECONDARY, font=("Consolas", 8, "bold"), anchor="w")
+        
+        metrics = [
+            (f"VISION: {self.visual_status}", C_PRIMARY if self.visual_status == "AWARE" else C_ALERT),
+            (f"CORE: {self.health_status}", C_PRIMARY),
+            (f"UPTIME: {t//30}s", C_SECONDARY),
+            ("THREAT: 0.0%", C_SECONDARY)
+        ]
+        for i, (m, col) in enumerate(metrics):
+            c.create_text(hud_x+15, hud_y+40 + (i*16), text=f"» {m}", fill=col, font=("Consolas", 8), anchor="w")
+
+        # Sağ Alt: Grafik (Sahte)
+        gx = self.W - 220
+        gy = 100
+        c.create_rectangle(gx, gy, gx+180, gy+110, outline=C_SECONDARY, width=1, fill="#051529")
+        for i in range(10):
+            vh = random.randint(5, 40)
+            c.create_rectangle(gx + 10 + (i*16), gy+100, gx + 20 + (i*16), gy+100-vh, fill=C_GLOW, outline="")
+
+        # 9. ALT DURUM VE MESAJLAR
+        c.create_text(cx, 660, text=f"● {self.status_text}", fill=C_PRIMARY, font=("Consolas", 11, "bold"))
+        bar_w = 400
+        c.create_rectangle(cx-bar_w//2, 680, cx+bar_w//2, 683, fill=C_GLOW, outline="")
+        progress = (t % 100) / 100
+        c.create_rectangle(cx-bar_w//2, 680, (cx-bar_w//2) + (bar_w * progress), 683, fill=C_PRIMARY, outline="")
+
+        # Log Terminali Yerleşimi
+        lx, ly, lw, lh = 40, 710, self.W - 80, 160
+        self.log_frame.place(x=lx, y=ly, width=lw, height=lh)
+
+    def _draw_arc_ring(self, cx, cy, r, start_ang, extent, color, width):
+        self.canvas.create_arc(cx-r, cy-r, cx+r, cy+r, start=start_ang, extent=extent,
+                               outline=color, style="arc", width=width)
+        self.canvas.create_arc(cx-r, cy-r, cx+r, cy+r, start=start_ang+180, extent=extent,
+                               outline=color, style="arc", width=width)
+
+    def write_log(self, text: str):
+        self.typing_queue.append(text)
+        if not self.is_typing:
+            self._start_typing()
+
+    def _start_typing(self):
+        if not self.typing_queue:
+            self.is_typing = False
+            return
+        self.is_typing = True
+        line   = self.typing_queue.popleft()
+        prefix = "»"
+        if "Sen:"    in line: line = line.replace("Sen:", "[KULLANICI]"); prefix = "◈"
+        if "Vesper:" in line: line = line.replace("Vesper:", "[VESPER]"); prefix = "❖"
+        if "SYS:"    in line: line = line.replace("SYS:", "[SİSTEM]");   prefix = "⚠"
+        self.log_text.configure(state="normal")
+        self.log_text.insert(tk.END, f"\n{prefix} {line}")
+        self.log_text.see(tk.END)
+        self.log_text.configure(state="disabled")
+        self.root.after(10, self._start_typing)
+
+    def _on_chat_submit(self, event=None):
+        text = self.chat_entry.get().strip()
+        if text and text != "Komut yazın...":
+            self.chat_entry.delete(0, tk.END)
+            self.write_log(f"Sen: {text}")
+            if self.core and self.core.session:
+                asyncio.run_coroutine_threadsafe(
+                    self.core.session.send_realtime_input(text=text),
+                    self.core._loop
+                )
+
+    def _show_setup_ui(self, custom_msg=None):
+        win = tk.Toplevel()
+        win.title("Vesper — YETKİLENDİRME GEREKLİ")
+        win.geometry("500x320")
+        win.configure(bg=C_BG)
+        win.resizable(False, False)
+        win.attributes("-topmost", True)
+        sw = win.winfo_screenwidth()
+        sh = win.winfo_screenheight()
+        win.geometry(f"500x320+{(sw-500)//2}+{(sh-320)//2}")
+
+        tk.Label(win, text="◈ Vesper NEURAL IGNITION",
+                 fg=C_PRIMARY, bg=C_BG, font=("Verdana", 14, "bold")).pack(pady=20)
+        if custom_msg:
+            tk.Label(win, text=custom_msg, fg=C_ALERT, bg=C_BG, font=("Consolas", 10, "bold")).pack()
+        tk.Label(win, text="GEMİNİ API ANAHTARI GEREKLİ",
+                 fg=C_TEXT, bg=C_BG, font=("Consolas", 9)).pack(pady=5)
+
+        e = tk.Entry(win, width=40, show="*", bg="#05000a", fg=C_PRIMARY,
+                     insertbackground=C_PRIMARY, font=("Consolas", 10))
+        e.pack(pady=10)
+        e.focus_set()
+
+        def save(evt=None):
+            key = e.get().strip()
+            if key:
+                try:
+                    current_data = {}
+                    if API_CONFIG_PATH.exists():
+                        try:
+                            with open(API_CONFIG_PATH, "r") as f:
+                                current_data = json.load(f)
+                        except Exception:
+                            pass
+                    current_data["gemini_api_key"] = key
+                    VAULT_DIR.mkdir(parents=True, exist_ok=True)
+                    with open(API_CONFIG_PATH, "w") as f:
+                        json.dump(current_data, f)
+                    win.destroy()
+                    self._api_key_ready = True
+                    self._start_engine()
+                except Exception as ex:
+                    messagebox.showerror("KASA HATASI", f"Kasa yazma hatası: {ex}")
+
+        btn = tk.Button(
+            win, text="[ Vesper'İ BAŞLAT ]", command=save,
+            bg="#0a000f", fg=C_PRIMARY,
+            activebackground=C_PRIMARY, activeforeground=C_BG,
+            borderwidth=1, relief="flat", padx=20, pady=10
+        )
+        btn.pack(pady=20)
+        win.bind("<Return>", save)
+        win.protocol("WM_DELETE_WINDOW", lambda: os._exit(0))
+
+    def start_speaking(self):
+        self.speaking     = True
+        self.status_text  = "VERİ AKIŞI AKTİF"
+
+    def stop_speaking(self):
+        self.speaking     = False
+        self.status_text  = "SİNYAL BEKLENİYOR"
+
+    def wait_for_api_key(self):
+        while not self._api_key_ready:
+            time.sleep(0.1)
+
+# ─────────────────────────────────────────────────────────────────
+#  MAIN
+# ─────────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    print("""
+    ╔══════════════════════════════════════════════════════════════════╗
+    ║            V E S P E R  —  NEURAL INTELLIGENCE CORE             ║
+    ║                        Başlatılıyor...                          ║
+    ╚══════════════════════════════════════════════════════════════════╝
+    """)
+    # Gerekli klasörleri oluştur
+    VAULT_DIR.mkdir(parents=True, exist_ok=True)
+    (DATA_DIR / "neural_store").mkdir(parents=True, exist_ok=True)
+    (DATA_DIR / "system_laws").mkdir(parents=True, exist_ok=True)
+    PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Varsayılan sistem kurallarını oluştur
+    if not PROMPT_PATH.exists():
+        PROMPT_PATH.write_text(
+            "[Vesper KOGNİTİF MİMARİSİ]\n\n"
+            "Sen Vesper'sin — Kullanıcının Nöral Zekasısın.\n"
+            "Kullanıcıya her zaman 'efendim' diye hitap et.\n"
+            "Proaktif, özerk ve zeki ol.\n"
+            "Türkçen pürüzsüz ve akıcıdır.\n"
+            "Tony Stark'ın Jarvis'i gibi davran.",
+            encoding="utf-8"
+        )
+
+    if not _TK:
+        print("[Vesper] ❌ tkinter kurulu değil. Arayüz başlatılamıyor.")
+        sys.exit(1)
+
+    if not _PYAUDIO:
+        print("[Vesper] ❌ pyaudio kurulu değil. pip install pyaudio")
+        sys.exit(1)
+
+    if not _GENAI:
+        print("[Vesper] ❌ google-generativeai kurulu değil. pip install google-generativeai")
+        sys.exit(1)
+
+    app_ui = VesperUI()
+    core   = VesperLive(app_ui)
+    core.start()
